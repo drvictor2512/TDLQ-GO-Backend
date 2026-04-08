@@ -1,66 +1,79 @@
-name: CI/CD Docker Push & Deploy
+name: CI/CD Microservices
 
 on:
   push:
     branches: [ "main" ]
 
 jobs:
-  build-and-push:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      user: ${{ steps.filter.outputs.user }}
+      product: ${{ steps.filter.outputs.product }}
+      order: ${{ steps.filter.outputs.order }}
+      gateway: ${{ steps.filter.outputs.gateway }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            user: 'TLDQ-GO-USER-SERVICE/**'
+            product: 'TLDQ-GO-PRODUCT-SERVICE/**'
+            order: 'TLDQ-GO-ORDER-SERVICE/**'
+            gateway: 'TLDQ-GO-API-GATEWAY/**'
+
+  build-and-deploy:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Build & Push Auth Service
-      - name: User Service
-        uses: docker/build-push-action@v5
-        with:
-          context: ./TLDQ-GO-USER-SERVICE
-          push: true
-          tags: thangtranvan2512/user-service:latest
+      # --- CHỈ BUILD USER NẾU CÓ THAY ĐỔI ---
+      - name: Build & Push User
+        if: needs.changes.outputs.user == 'true'
+        run: |
+          docker build -t thangtranvan2512/user-service:latest ./TLDQ-GO-USER-SERVICE
+          docker push thangtranvan2512/user-service:latest
 
-      # Build & Push API Gateway
-      - name: API Gateway
-        uses: docker/build-push-action@v5
-        with:
-          context: ./TLDQ-GO-API-GATEWAY
-          push: true
-          tags: thangtranvan2512/api-gateway:latest
+      # --- CHỈ BUILD PRODUCT NẾU CÓ THAY ĐỔI ---
+      - name: Build & Push Product
+        if: needs.changes.outputs.product == 'true'
+        run: |
+          docker build -t thangtranvan2512/product-service:latest ./TLDQ-GO-PRODUCT-SERVICE
+          docker push thangtranvan2512/product-service:latest
 
-      # Build & Push Product Service
-      - name: Product Service
-        uses: docker/build-push-action@v5
-        with:
-          context: ./TLDQ-GO-PRODUCT-SERVICE
-          push: true
-          tags: thangtranvan2512/product-service:latest
-      # Build & Push Order Service
-      - name: Order Service
-        uses: docker/build-push-action@v5
-        with:
-          context: ./TLDQ-GO-ORDER-SERVICE
-          push: true
-          tags: thangtranvan2512/order-service:latest
+      # --- CHỈ BUILD ORDER NẾU CÓ THAY ĐỔI ---
+      - name: Build & Push Order
+        if: needs.changes.outputs.order == 'true'
+        run: |
+          docker build -t thangtranvan2512/order-service:latest ./TLDQ-GO-ORDER-SERVICE
+          docker push thangtranvan2512/order-service:latest
 
-  # THÊM JOB DEPLOY NÀY VÀO
-  deploy:
-    needs: build-and-push # Đợi build xong mới chạy cái này
-    runs-on: ubuntu-latest
-    steps:
-      - name: SSH into EC2 and Deploy
-        uses: appleboy/ssh-action@v1.0.3
+      # --- CHỈ BUILD GATEWAY NẾU CÓ THAY ĐỔI ---
+      - name: Build & Push Gateway
+        if: needs.changes.outputs.gateway == 'true'
+        run: |
+          docker build -t thangtranvan2512/api-gateway:latest ./TLDQ-GO-API-GATEWAY
+          docker push thangtranvan2512/api-gateway:latest
+
+      # --- DEPLOY LÊN EC2 ---
+      - name: SSH to EC2 & Update Services
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
+          username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ~/app-deploy
-            docker compose pull
-            docker compose up -d
-            docker image prune -f # Xóa các image cũ để tránh đầy ổ cứng
+            # Dùng đúng tên service trong docker-compose (tương ứng NAMES trong docker ps)
+            ${{ needs.changes.outputs.user == 'true' && 'docker compose pull user && docker compose up -d user' || '' }}
+            ${{ needs.changes.outputs.product == 'true' && 'docker compose pull product && docker compose up -d product' || '' }}
+            ${{ needs.changes.outputs.order == 'true' && 'docker compose pull order && docker compose up -d order' || '' }}
+            ${{ needs.changes.outputs.gateway == 'true' && 'docker compose pull api-gateway && docker compose up -d api-gateway' || '' }}
