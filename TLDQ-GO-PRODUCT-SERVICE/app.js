@@ -21,7 +21,7 @@ app.get("/", (req, res) => {
   res.send("Product service running 🚀");
 });
 
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PRODUCT_SERVICE_PORT || 3002;
 
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);

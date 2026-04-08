@@ -1,0 +1,66 @@
+name: CI/CD Docker Push & Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build & Push Auth Service
+      - name: User Service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./TLDQ-GO-USER-SERVICE
+          push: true
+          tags: thangtranvan2512/user-service:latest
+
+      # Build & Push API Gateway
+      - name: API Gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: ./TLDQ-GO-API-GATEWAY
+          push: true
+          tags: thangtranvan2512/api-gateway:latest
+
+      # Build & Push Product Service
+      - name: Product Service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./TLDQ-GO-PRODUCT-SERVICE
+          push: true
+          tags: thangtranvan2512/product-service:latest
+      # Build & Push Order Service
+      - name: Order Service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./TLDQ-GO-ORDER-SERVICE
+          push: true
+          tags: thangtranvan2512/order-service:latest
+
+  # THÊM JOB DEPLOY NÀY VÀO
+  deploy:
+    needs: build-and-push # Đợi build xong mới chạy cái này
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into EC2 and Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/app-deploy
+            docker compose pull
+            docker compose up -d
+            docker image prune -f # Xóa các image cũ để tránh đầy ổ cứng

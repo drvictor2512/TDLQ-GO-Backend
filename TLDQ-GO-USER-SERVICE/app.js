@@ -22,7 +22,7 @@ app.get("/", (req, res) => {
   res.send("User service running22");
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.USER_SERVICE_PORT || 3001;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
