@@ -1,0 +1,64 @@
+services:
+  api-gateway:
+    container_name: api-gateway
+    build: ./TLDQ-GO-API-GATEWAY
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./TLDQ-GO-API-GATEWAY:/app
+      - /app/node_modules
+    env_file:
+      - ./TLDQ-GO-API-GATEWAY/.env
+    depends_on:
+      - user
+      - product
+      - order
+    restart: always
+    networks:
+      - micro-network
+
+  user:
+    container_name: user-service
+    build: ./TLDQ-GO-USER-SERVICE
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./TLDQ-GO-USER-SERVICE:/app
+      - /app/node_modules
+    env_file:
+      - ./TLDQ-GO-USER-SERVICE/.env
+    restart: always
+    networks:
+      - micro-network
+
+  product:
+    container_name: product-service
+    build: ./TLDQ-GO-PRODUCT-SERVICE
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./TLDQ-GO-PRODUCT-SERVICE:/app
+      - /app/node_modules
+    env_file:
+      - ./TLDQ-GO-PRODUCT-SERVICE/.env
+    restart: always
+    networks:
+      - micro-network
+
+  order:
+    container_name: order-service
+    build: ./TLDQ-GO-ORDER-SERVICE
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./TLDQ-GO-ORDER-SERVICE:/app
+      - /app/node_modules
+    env_file:
+      - ./TLDQ-GO-ORDER-SERVICE/.env
+    restart: always
+    networks:
+      - micro-network
+
+networks:
+  micro-network:
+    driver: bridge
