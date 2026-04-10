@@ -3,11 +3,15 @@ const app = express();
 const cors = require("cors");
 require("dotenv").config();
 const connectDB = require("./config/db");
-
-connectDB();
+const orderRoutes = require("./routes/order.routes");
 
 app.use(cors());
 app.use(express.json());
+
+connectDB();
+
+app.use("/orders", orderRoutes);
+
 app.get("/", (req, res) => {
   res.send("order service running");
 });

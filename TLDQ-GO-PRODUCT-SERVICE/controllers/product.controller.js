@@ -1,41 +1,71 @@
-const Product = require("../models/product.model");
+const productService = require("../services/product.service");
 
-// CREATE PRODUCT
-const createProduct = async (req, res) => {
+exports.getAllProducts = async (req, res) => {
   try {
-    const { seller_id, category_id, name, price, stock_quantity, images } =
-      req.body;
-
-    // validate đơn giản
-    if (!seller_id || !name) {
-      return res.status(400).json({
-        message: "Thiếu seller_id hoặc name",
-      });
-    }
-
-    const product = new Product({
-      seller_id,
-      category_id,
-      name,
-      price,
-      stock_quantity,
-      images,
+    const products = await productService.getAll();
+    res.status(200).json({
+      message: "Lấy danh sách sản phẩm thành công",
+      data: products,
     });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "Lỗi server",
+    });
+  }
+};
 
-    const saved = await product.save();
+exports.getProductById = async (req, res) => {
+  try {
+    const product = await productService.getById(req.params.id);
+    res.status(200).json({
+      message: "Lấy chi tiết sản phẩm thành công",
+      data: product,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "Lỗi server",
+    });
+  }
+};
 
+exports.createProduct = async (req, res) => {
+  try {
+    const saved = await productService.create(req.body);
     res.status(201).json({
       message: "Tạo sản phẩm thành công",
       data: saved,
     });
   } catch (error) {
-    res.status(500).json({
-      message: "Lỗi server",
-      error: error.message,
+    res.status(error.status || 500).json({
+      message: error.message || "Lỗi server",
     });
   }
 };
 
-module.exports = {
-  createProduct,
+exports.updateProduct = async (req, res) => {
+  try {
+    const updated = await productService.update(req.params.id, req.body);
+    res.status(200).json({
+      message: "Cập nhật sản phẩm thành công",
+      data: updated,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "Lỗi server",
+    });
+  }
+};
+
+exports.deleteProduct = async (req, res) => {
+  try {
+    const deleted = await productService.remove(req.params.id);
+    res.status(200).json({
+      message: "Xóa sản phẩm thành công",
+      data: deleted,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message || "Lỗi server",
+    });
+  }
 };

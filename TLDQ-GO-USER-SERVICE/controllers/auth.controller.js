@@ -1,85 +1,75 @@
+const authService = require("../services/auth.service");
 const User = require("../models/user.model");
-const SellerProfile = require("../models/sellerProfile.model");
-const CustomerProfile = require("../models/customerProfile.model");
-
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 
 exports.register = async (req, res) => {
   try {
-    const { email, password, phone, full_name, role } = req.body;
-
-    const existingUser = await User.findOne({ email });
-
-    if (existingUser) {
-      return res.status(400).json({
-        message: "Email already exists",
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser = await User.create({
-      email,
-      password_hash: hashedPassword,
-      phone,
-      full_name,
-      role,
-    });
-
-    // create profile
-    if (role === "seller") {
-      await SellerProfile.create({
-        seller_id: newUser._id,
-      });
-    } else {
-      await CustomerProfile.create({
-        user_id: newUser._id,
-      });
-    }
-
+    const newUser = await authService.registerUser(req.body);
     res.status(201).json({
       message: "Register success",
       user: newUser,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.status || 500).json({
       message: error.message,
     });
   }
 };
 
-exports.signin = async (req, res) => {
+exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const result = await authService.loginUser(email, password);
 
-    if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
-    }
+    res.status(200).json({
+      message: "Login success",
+      token: result.token,
+      user: result.user,
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({
+      message: error.message,
+    });
+  }
+};
 
-    const user = await User.findOne({ email });
+exports.getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select("-password_hash");
     if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(404).json({ message: "User not found" });
     }
-
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      return res.status(500).json({ message: "JWT secret not configured" });
-    }
-
-    const payload = { sub: user._id, email: user.email, role: user.role };
-    const token = jwt.sign(payload, secret, { expiresIn: process.env.JWT_EXPIRES_IN });
-
-    const safeUser = user.toObject();
-    delete safeUser.password_hash;
-
-    res.json({ message: "Login success", token, user: safeUser });
+    res.status(200).json({ message: "Success", user });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateUser = async (req, res) => {
+  try {
+    const { full_name, phone, role, avatar_url, email } = req.body;
+
+    const updateData = { full_name, phone, role, avatar_url };
+    if (email) {
+      updateData.email = email;
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      { $set: updateData },
+      { new: true, runValidators: true },
+    ).select("-password_hash");
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({
+      message: "Update success",
+      user: updatedUser,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
   }
 };
