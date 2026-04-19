@@ -12,6 +12,7 @@ const {
   createProduct,
   updateProduct,
   deleteProduct,
+  getProductsBySeller,
 } = require("../controllers/product.controller");
 
 // GET
@@ -26,6 +27,7 @@ router.delete("/products/:id", deleteProduct);
 
 router.post("/products", upload.array("images", 5), createProduct);
 router.get("/products/page", getProductsWithPage);
+router.get("/products/seller/:seller_id", getProductsBySeller);
 
 router.get("/products/:id", getProductById);
 module.exports = router;

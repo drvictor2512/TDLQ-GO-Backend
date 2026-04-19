@@ -199,3 +199,43 @@ exports.getProductsWithPage = async (req, res) => {
     });
   }
 };
+
+// GET BY SELLER
+exports.getProductsBySeller = async (req, res) => {
+  try {
+    const { seller_id } = req.params;
+    let { page = 1 } = req.query;
+    page = parseInt(page);
+
+    if (page < 1) {
+      return res.status(400).json({ message: "Page không hợp lệ" });
+    }
+
+    const limit = 8;
+    const skip = (page - 1) * limit;
+
+    const total = await Product.countDocuments({ seller_id });
+
+    const products = await Product.find({ seller_id })
+      .populate("category_id")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return res.status(200).json({
+      message: "Lấy sản phẩm của nhà bán thành công",
+      data: products,
+      pagination: {
+        page,
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        limit,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Lỗi server",
+      error: error.message,
+    });
+  }
+};
