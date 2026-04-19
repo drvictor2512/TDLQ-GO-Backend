@@ -30,6 +30,12 @@ const productSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+
+    // ✅ THÊM MÔ TẢ
+    description: {
+      type: String,
+      default: "",
+    },
   },
   { timestamps: true },
 );

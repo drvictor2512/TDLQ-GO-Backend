@@ -27,7 +27,8 @@ const proxyOptions = (target, rewritePrefix) => ({
         res.status(502).json({
           success: false,
           message: "Service temporarily unavailable. Please try again later.",
-          error: process.env.NODE_ENV === "development" ? err.message : undefined,
+          error:
+            process.env.NODE_ENV === "development" ? err.message : undefined,
         });
       }
     },
@@ -43,7 +44,9 @@ const proxyOptions = (target, rewritePrefix) => ({
         try {
           proxyReq.write(bodyData);
         } catch (writeErr) {
-          console.error(`[GATEWAY] Failed to write proxied body: ${writeErr.message}`);
+          console.error(
+            `[GATEWAY] Failed to write proxied body: ${writeErr.message}`,
+          );
         }
       }
     },
