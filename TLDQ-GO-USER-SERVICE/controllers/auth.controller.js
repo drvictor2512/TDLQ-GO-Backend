@@ -66,7 +66,31 @@ async function registerByRole(req, res, role) {
 
   const existingUser = await User.findOne({ email: normalizedEmail });
   if (existingUser) {
-    return res.status(409).json({ message: "Email đã tồn tại" });
+    if (existingUser.role === role) {
+      return res.status(409).json({ message: "Email đã tồn tại" });
+    }
+
+    // Cho phép nâng cấp tài khoản customer lên seller khi đăng ký lại với cùng email.
+    if (existingUser.role === "customer" && role === "seller") {
+      existingUser.role = "seller";
+      existingUser.password_hash = await bcrypt.hash(password, 10);
+      if (phone) existingUser.phone = phone;
+      if (full_name) existingUser.full_name = full_name;
+
+      await existingUser.save();
+      await ensureProfileByRole(existingUser._id, "seller");
+
+      const token = createAccessToken(existingUser);
+      return res.status(200).json({
+        message: "Nâng cấp tài khoản seller thành công",
+        token,
+        user: omitPassword(existingUser),
+      });
+    }
+
+    return res.status(409).json({
+      message: "Email đã tồn tại với vai trò khác",
+    });
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
