@@ -21,6 +21,12 @@ router.post(
 
 // Seller flow
 router.post("/seller/register", authController.registerSeller);
+router.post(
+  "/seller/upgrade",
+  authMiddleware,
+  authMiddleware.requireRoles("customer"),
+  authController.upgradeSeller,
+);
 router.post("/seller/login", authController.loginSeller);
 router.post(
   "/seller/change-password",

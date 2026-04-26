@@ -66,31 +66,7 @@ async function registerByRole(req, res, role) {
 
   const existingUser = await User.findOne({ email: normalizedEmail });
   if (existingUser) {
-    if (existingUser.role === role) {
-      return res.status(409).json({ message: "Email đã tồn tại" });
-    }
-
-    // Cho phép nâng cấp tài khoản customer lên seller khi đăng ký lại với cùng email.
-    if (existingUser.role === "customer" && role === "seller") {
-      existingUser.role = "seller";
-      existingUser.password_hash = await bcrypt.hash(password, 10);
-      if (phone) existingUser.phone = phone;
-      if (full_name) existingUser.full_name = full_name;
-
-      await existingUser.save();
-      await ensureProfileByRole(existingUser._id, "seller");
-
-      const token = createAccessToken(existingUser);
-      return res.status(200).json({
-        message: "Nâng cấp tài khoản seller thành công",
-        token,
-        user: omitPassword(existingUser),
-      });
-    }
-
-    return res.status(409).json({
-      message: "Email đã tồn tại với vai trò khác",
-    });
+    return res.status(409).json({ message: "Email đã tồn tại" });
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
@@ -208,6 +184,48 @@ exports.changePasswordUser = async (req, res) => {
 exports.registerSeller = async (req, res) => {
   try {
     return await registerByRole(req, res, "seller");
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.upgradeSeller = async (req, res) => {
+  try {
+    if (req.userRole !== "customer") {
+      return res.status(403).json({
+        message: "Chỉ tài khoản customer mới có thể nâng cấp lên seller",
+      });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    if (user.role === "seller") {
+      const token = createAccessToken(user);
+      return res.status(200).json({
+        message: "Tài khoản đã là seller",
+        token,
+        user: omitPassword(user),
+      });
+    }
+
+    const { phone, full_name } = req.body || {};
+
+    user.role = "seller";
+    if (typeof phone !== "undefined") user.phone = phone;
+    if (typeof full_name !== "undefined") user.full_name = full_name;
+
+    await user.save();
+    await ensureProfileByRole(user._id, "seller");
+
+    const token = createAccessToken(user);
+    return res.status(200).json({
+      message: "Nâng cấp tài khoản seller thành công",
+      token,
+      user: omitPassword(user),
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
