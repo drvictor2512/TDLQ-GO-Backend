@@ -157,7 +157,7 @@ exports.deleteProduct = async (req, res) => {
 };
 
 //
-// PAGINATION (8 sản phẩm / trang)
+// PAGINATION 10 sản phẩm / trang)
 exports.getProductsWithPage = async (req, res) => {
   try {
     let { page = 1 } = req.query;
@@ -169,7 +169,7 @@ exports.getProductsWithPage = async (req, res) => {
       });
     }
 
-    const limit = 8;
+    const limit = 10;
     const skip = (page - 1) * limit;
 
     const total = await Product.countDocuments();
@@ -211,7 +211,7 @@ exports.getProductsBySeller = async (req, res) => {
       return res.status(400).json({ message: "Page không hợp lệ" });
     }
 
-    const limit = 8;
+    const limit = 10;
     const skip = (page - 1) * limit;
 
     const total = await Product.countDocuments({ seller_id });
