@@ -18,14 +18,13 @@ const {
 // GET
 router.get("/products", getAllProducts);
 
-// PUT
-router.put("/products/:id", updateProduct);
+// PUT (support single image upload)
+router.put("/products/:id", upload.single("image"), updateProduct);
 
 // DELETE
 router.delete("/products/:id", deleteProduct);
-// POST (upload ảnh)
-
-router.post("/products", upload.array("images", 5), createProduct);
+// POST (upload single image)
+router.post("/products", upload.single("image"), createProduct);
 router.get("/products/page", getProductsWithPage);
 router.get("/products/seller/:seller_id", getProductsBySeller);
 
