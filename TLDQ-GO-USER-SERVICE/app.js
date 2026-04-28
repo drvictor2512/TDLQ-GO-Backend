@@ -16,7 +16,7 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
-app.use("/users", authRoutes);
+app.use("/api/users", authRoutes);
 
 app.get("/", (req, res) => {
   res.send("User service running22");

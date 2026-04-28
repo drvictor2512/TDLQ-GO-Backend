@@ -3,6 +3,7 @@ const SellerProfile = require("../models/sellerProfile.model");
 const CustomerProfile = require("../models/customerProfile.model");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const emailService = require("../services/email.service");
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const USER_ROLES = ["customer", "seller", "admin"];
@@ -449,6 +450,300 @@ exports.getProfile = async (req, res) => {
 
     res.status(200).json({ user });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body || {};
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(200).json({ message: "If email exists, reset link has been sent" });
+    }
+
+    const resetToken = jwt.sign(
+      { userId: user._id.toString(), email: user.email },
+      process.env.JWT_SECRET || "secretkey",
+      { expiresIn: "15m" }
+    );
+
+    await User.findByIdAndUpdate(user._id, {
+      reset_password_token: resetToken,
+      reset_password_expires: new Date(Date.now() + 15 * 60 * 1000)
+    });
+
+    try {
+      await emailService.sendResetPasswordEmail(user.email, resetToken);
+    } catch (emailError) {
+      console.error("Email sending failed:", emailError.message);
+    }
+
+    return res.status(200).json({ message: "If email exists, reset link has been sent" });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+
+    if (!token || !newPassword) {
+      return res.status(400).json({ message: "Token và mật khẩu mới là bắt buộc" });
+    }
+
+    if (!validatePassword(newPassword)) {
+      return res.status(400).json({ message: "Mật khẩu phải có ít nhất 6 ký tự" });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || "secretkey");
+    } catch (err) {
+      return res.status(400).json({ message: "Link đặt lại mật khẩu đã hết hạn hoặc không hợp lệ" });
+    }
+
+    const user = await User.findOne({
+      _id: decoded.userId,
+      reset_password_token: token,
+      reset_password_expires: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: "Link đặt lại mật khẩu đã hết hạn hoặc không hợp lệ" });
+    }
+
+    user.password_hash = await bcrypt.hash(newPassword, 10);
+    user.reset_password_token = undefined;
+    user.reset_password_expires = undefined;
+    await user.save();
+
+    return res.status(200).json({ message: "Đặt lại mật khẩu thành công" });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({ message: "Đã xảy ra lỗi khi đặt lại mật khẩu" });
+  }
+};
+
+exports.updateProfile = async (req, res) => {
+  try {
+    if (req.userRole !== "customer") {
+      return res.status(403).json({ message: "Chỉ tài khoản customer mới có thể cập nhật profile bằng endpoint này" });
+    }
+
+    const userId = req.userId;
+    const { full_name, phone, avatar_url, address_line } = req.body || {};
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    if (typeof full_name !== "undefined") user.full_name = full_name;
+    if (typeof phone !== "undefined") user.phone = phone;
+    if (typeof avatar_url !== "undefined") user.avatar_url = avatar_url;
+    await user.save();
+
+    if (typeof address_line !== "undefined") {
+      let customerProfile = await CustomerProfile.findOne({ user_id: userId });
+      if (!customerProfile) {
+        customerProfile = await CustomerProfile.create({ user_id: userId });
+      }
+      customerProfile.address_line = address_line;
+      await customerProfile.save();
+    }
+
+    const updatedUser = await User.findById(userId).select("-password_hash");
+    let customerProfile = await CustomerProfile.findOne({ user_id: userId });
+
+    return res.status(200).json({
+      message: "Cập nhật profile thành công",
+      user: {
+        ...updatedUser.toObject(),
+        customerProfile: customerProfile ? customerProfile.toObject() : null,
+      },
+    });
+  } catch (error) {
+    console.error("Update profile error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateSellerProfile = async (req, res) => {
+  try {
+    if (req.userRole !== "seller") {
+      return res.status(403).json({ message: "Chỉ tài khoản seller mới có thể cập nhật profile bằng endpoint này" });
+    }
+
+    const userId = req.userId;
+    const { full_name, phone, avatar_url, shop_name, address_line } = req.body || {};
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Seller không tồn tại" });
+    }
+
+    if (typeof full_name !== "undefined") user.full_name = full_name;
+    if (typeof phone !== "undefined") user.phone = phone;
+    if (typeof avatar_url !== "undefined") user.avatar_url = avatar_url;
+    await user.save();
+
+    let sellerProfile = await SellerProfile.findOne({ seller_id: userId });
+    if (!sellerProfile) {
+      sellerProfile = await SellerProfile.create({ seller_id: userId });
+    }
+
+    if (typeof shop_name !== "undefined") sellerProfile.shop_name = shop_name;
+    if (typeof address_line !== "undefined") sellerProfile.address_line = address_line;
+    await sellerProfile.save();
+
+    const updatedUser = await User.findById(userId).select("-password_hash");
+
+    return res.status(200).json({
+      message: "Cập nhật profile seller thành công",
+      user: {
+        ...updatedUser.toObject(),
+        sellerProfile: sellerProfile.toObject(),
+      },
+    });
+  } catch (error) {
+    console.error("Update seller profile error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.changePassword = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const userRole = req.userRole;
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "currentPassword và newPassword là bắt buộc" });
+    }
+
+    if (!validatePassword(newPassword)) {
+      return res.status(400).json({ message: "Mật khẩu mới phải có ít nhất 6 ký tự" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    if (userRole === "seller" && user.role !== "seller") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (userRole === "customer" && user.role !== "customer") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Mật khẩu hiện tại không đúng" });
+    }
+
+    user.password_hash = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    return res.status(200).json({ message: "Đổi mật khẩu thành công" });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getShopSetupStatus = async (req, res) => {
+  try {
+    if (req.userRole !== "seller") {
+      return res.status(403).json({ message: "Chỉ tài khoản seller mới có quyền truy cập" });
+    }
+
+    const userId = req.userId;
+    const sellerProfile = await SellerProfile.findOne({ seller_id: userId });
+
+    const isSetupComplete = sellerProfile
+      && sellerProfile.shop_name
+      && sellerProfile.shop_name.trim() !== "";
+
+    return res.status(200).json({
+      isSetupComplete,
+      profile: sellerProfile ? sellerProfile.toObject() : null,
+    });
+  } catch (error) {
+    console.error("Get shop setup status error:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateShopSettings = async (req, res) => {
+  try {
+    if (req.userRole !== "seller") {
+      return res.status(403).json({ message: "Chỉ tài khoản seller mới có quyền truy cập" });
+    }
+
+    const userId = req.userId;
+    const {
+      shop_name,
+      description,
+      address_line,
+      shop_email,
+      shop_phone,
+      logo_url,
+      banner_url,
+      operating_hours,
+      shipping_policy,
+      return_policy,
+      status,
+    } = req.body || {};
+
+    if (!shop_name || !shop_name.trim()) {
+      return res.status(400).json({ message: "Tên cửa hàng là bắt buộc" });
+    }
+
+    if (!address_line || !address_line.trim()) {
+      return res.status(400).json({ message: "Địa chỉ cửa hàng là bắt buộc" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Seller không tồn tại" });
+    }
+
+    let sellerProfile = await SellerProfile.findOne({ seller_id: userId });
+    if (!sellerProfile) {
+      sellerProfile = new SellerProfile({ seller_id: userId });
+    }
+
+    if (typeof shop_name !== "undefined") sellerProfile.shop_name = shop_name;
+    if (typeof description !== "undefined") sellerProfile.description = description;
+    if (typeof address_line !== "undefined") sellerProfile.address_line = address_line;
+    if (typeof shop_email !== "undefined") sellerProfile.shop_email = shop_email;
+    if (typeof shop_phone !== "undefined") sellerProfile.shop_phone = shop_phone;
+    if (typeof logo_url !== "undefined") sellerProfile.logo_url = logo_url;
+    if (typeof banner_url !== "undefined") sellerProfile.banner_url = banner_url;
+    if (typeof operating_hours !== "undefined") sellerProfile.operating_hours = operating_hours;
+    if (typeof shipping_policy !== "undefined") sellerProfile.shipping_policy = shipping_policy;
+    if (typeof return_policy !== "undefined") sellerProfile.return_policy = return_policy;
+    if (typeof status !== "undefined") sellerProfile.status = status;
+
+    await sellerProfile.save();
+
+    return res.status(200).json({
+      message: "Cập nhật cài đặt cửa hàng thành công",
+      profile: sellerProfile.toObject(),
+    });
+  } catch (error) {
+    console.error("Update shop settings error:", error);
     res.status(500).json({ message: error.message });
   }
 };
