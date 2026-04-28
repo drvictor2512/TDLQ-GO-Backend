@@ -55,7 +55,15 @@ PRODUCT SERVICE - /api/products/* -> http://localhost:3002/products/*
 app.use("/api/products", (req, res) => forwardRequest(req, res, PRODUCT_SERVICE_URL));
 
 /*
-ORDER SERVICE - /api/orders/* -> http://localhost:3003/orders/*
+VOUCHER (proxy to product service)
+*/
+app.use(
+  "/api/vouchers",
+  createProxyMiddleware(proxyOptions(PRODUCT_SERVICE_URL, "/vouchers")),
+);
+
+/*
+ORDER SERVICE
 */
 app.use("/api/orders", (req, res) => forwardRequest(req, res, ORDER_SERVICE_URL));
 

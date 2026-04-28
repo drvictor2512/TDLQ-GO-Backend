@@ -62,22 +62,18 @@ exports.createProduct = async (req, res) => {
 
     let imageUrls = [];
 
-    if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map((file) => {
-        return new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            { folder: "products" },
-            (error, result) => {
-              if (error) return reject(error);
-              resolve(result.secure_url);
-            },
-          );
-
-          stream.end(file.buffer);
+    if (req.file) {
+      const file = req.file;
+      const url = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream({ folder: "products" }, (error, result) => {
+          if (error) return reject(error);
+          resolve(result.secure_url);
         });
+
+        stream.end(file.buffer);
       });
 
-      imageUrls = await Promise.all(uploadPromises);
+      imageUrls = [url];
     }
 
     const newProduct = await Product.create({
@@ -110,7 +106,29 @@ exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const updated = await Product.findByIdAndUpdate(id, req.body, {
+    // If files are uploaded, process them and replace images
+    let imageUrls = [];
+
+    if (req.file) {
+      const file = req.file;
+      const url = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream({ folder: "products" }, (error, result) => {
+          if (error) return reject(error);
+          resolve(result.secure_url);
+        });
+
+        stream.end(file.buffer);
+      });
+
+      imageUrls = [url];
+    }
+
+    const updateData = { ...req.body };
+    if (imageUrls && imageUrls.length > 0) {
+      updateData.images = imageUrls;
+    }
+
+    const updated = await Product.findByIdAndUpdate(id, updateData, {
       new: true,
     });
 
