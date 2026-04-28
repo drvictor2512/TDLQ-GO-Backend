@@ -70,6 +70,14 @@ app.use(
 );
 
 /*
+VOUCHER (proxy to product service)
+*/
+app.use(
+  "/api/vouchers",
+  createProxyMiddleware(proxyOptions(PRODUCT_SERVICE_URL, "/vouchers")),
+);
+
+/*
 ORDER SERVICE
 */
 app.use(
