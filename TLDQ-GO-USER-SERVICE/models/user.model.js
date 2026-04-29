@@ -26,6 +26,8 @@ const userSchema = new mongoose.Schema({
     default: "active",
   },
   avatar_url: String,
+  reset_password_token: String,
+  reset_password_expires: Date,
 });
 
 module.exports = mongoose.model("User", userSchema);

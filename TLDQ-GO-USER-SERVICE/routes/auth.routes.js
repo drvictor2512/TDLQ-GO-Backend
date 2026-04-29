@@ -18,6 +18,12 @@ router.post(
   authMiddleware.requireRoles("customer"),
   authController.changePasswordUser,
 );
+router.put(
+  "/user/profile",
+  authMiddleware,
+  authMiddleware.requireRoles("customer"),
+  authController.updateProfile,
+);
 
 // Seller flow
 router.post("/seller/register", authController.registerSeller);
@@ -33,6 +39,37 @@ router.post(
   authMiddleware,
   authMiddleware.requireRoles("seller"),
   authController.changePasswordSeller,
+);
+router.put(
+  "/seller/profile",
+  authMiddleware,
+  authMiddleware.requireRoles("seller"),
+  authController.updateSellerProfile,
+);
+
+// Seller Shop Settings
+router.get(
+  "/seller/setup-status",
+  authMiddleware,
+  authMiddleware.requireRoles("seller"),
+  authController.getShopSetupStatus,
+);
+router.put(
+  "/seller/settings",
+  authMiddleware,
+  authMiddleware.requireRoles("seller"),
+  authController.updateShopSettings,
+);
+
+// Forgot & Reset Password
+router.post("/forgot-password", authController.forgotPassword);
+router.post("/reset-password", authController.resetPassword);
+
+// Change Password (generic - works for both customer and seller)
+router.post(
+  "/change-password",
+  authMiddleware,
+  authController.changePassword,
 );
 
 // Admin flow
