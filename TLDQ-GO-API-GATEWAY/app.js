@@ -70,6 +70,15 @@ app.use("/api/orders", (req, res) =>
 );
 
 /*
+VOUCHER SERVICE (inside product service)
+*/
+app.use("/api/vouchers", (req, res) =>
+  forwardRequest(req, res, PRODUCT_SERVICE_URL, (path) =>
+    path.replace(/^\/api/, ""),
+  ),
+);
+
+/*
 TEST GATEWAY
 */
 app.get("/", (req, res) => {

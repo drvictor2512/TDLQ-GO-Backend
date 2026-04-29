@@ -109,8 +109,34 @@ exports.createProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
+    const existing = await Product.findById(id);
 
-    const updated = await Product.findByIdAndUpdate(id, req.body, {
+    if (!existing) {
+      return res.status(404).json({
+        message: "Không tìm thấy sản phẩm",
+      });
+    }
+
+    const payload = { ...req.body };
+
+    if (req.file) {
+      const imageUrl = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: "products" },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result.secure_url);
+          },
+        );
+
+        stream.end(req.file.buffer);
+      });
+
+      const oldImages = Array.isArray(existing.images) ? existing.images : [];
+      payload.images = [imageUrl, ...oldImages.slice(1)];
+    }
+
+    const updated = await Product.findByIdAndUpdate(id, payload, {
       new: true,
     });
 

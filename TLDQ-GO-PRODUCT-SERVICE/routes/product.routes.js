@@ -19,7 +19,7 @@ const {
 router.get("/products", getAllProducts);
 
 // PUT
-router.put("/products/:id", updateProduct);
+router.put("/products/:id", upload.single("image"), updateProduct);
 
 // DELETE
 router.delete("/products/:id", deleteProduct);
