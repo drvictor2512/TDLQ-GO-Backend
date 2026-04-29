@@ -4,6 +4,8 @@ const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
 const morgan = require("morgan");
+const http = require("http");
+const https = require("https");
 
 const app = express();
 const USER_SERVICE_URL = process.env.USER_SERVICE;
@@ -23,6 +25,38 @@ async function forwardRequest(req, res, target, transformPath) {
     const url = `${target}${forwardedPath}`;
     console.log(`[GATEWAY] -> ${req.method} ${incomingPath} -> ${url}`);
 
+    // For multipart/form-data (file uploads), pipe the raw request
+    if (req.is("multipart/form-data")) {
+      return new Promise((resolve, reject) => {
+        const targetUrl = new URL(url);
+        const protocol = targetUrl.protocol === "https:" ? https : http;
+
+        const options = {
+          method: req.method,
+          headers: {
+            ...req.headers,
+            host: targetUrl.host,
+          },
+          timeout: 30000,
+        };
+
+        const proxyReq = protocol.request(targetUrl, options, (proxyRes) => {
+          res.writeHead(proxyRes.statusCode, proxyRes.headers);
+          proxyRes.pipe(res);
+          proxyRes.on("end", resolve);
+        });
+
+        proxyReq.on("error", (error) => {
+          console.error(`[GATEWAY] Proxy error: ${error.message}`);
+          res.status(502).json({ success: false, message: "Service unavailable" });
+          reject(error);
+        });
+
+        req.pipe(proxyReq);
+      });
+    }
+
+    // For JSON/form-urlencoded, use axios
     const config = {
       method: req.method,
       url: url,
@@ -40,7 +74,7 @@ async function forwardRequest(req, res, target, transformPath) {
     console.error(`[GATEWAY] Error: ${error.message}`);
     if (error.response) {
       res.status(error.response.status).json(error.response.data);
-    } else {
+    } else if (!res.headersSent) {
       res.status(502).json({ success: false, message: "Service unavailable" });
     }
   }
