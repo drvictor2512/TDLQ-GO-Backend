@@ -16,11 +16,13 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
 // Helper function to forward request
-async function forwardRequest(req, res, target) {
+async function forwardRequest(req, res, target, transformPath) {
   try {
-    const url = `${target}${req.originalUrl}`;
-    console.log(`[GATEWAY] -> ${req.method} ${req.originalUrl} -> ${url}`);
-    
+    const incomingPath = req.originalUrl;
+    const forwardedPath = transformPath ? transformPath(incomingPath) : incomingPath;
+    const url = `${target}${forwardedPath}`;
+    console.log(`[GATEWAY] -> ${req.method} ${incomingPath} -> ${url}`);
+
     const config = {
       method: req.method,
       url: url,
@@ -31,7 +33,7 @@ async function forwardRequest(req, res, target) {
       data: req.body,
       timeout: 30000,
     };
-    
+
     const response = await axios(config);
     res.status(response.status).json(response.data);
   } catch (error) {
@@ -45,19 +47,27 @@ async function forwardRequest(req, res, target) {
 }
 
 /*
-USER SERVICE - /api/users/* -> http://localhost:3001/api/users/*
+USER SERVICE
 */
 app.use("/api/users", (req, res) => forwardRequest(req, res, USER_SERVICE_URL));
 
 /*
-PRODUCT SERVICE - /api/products/* -> http://localhost:3002/products/*
+PRODUCT SERVICE 
 */
-app.use("/api/products", (req, res) => forwardRequest(req, res, PRODUCT_SERVICE_URL));
+app.use("/api/products", (req, res) =>
+  forwardRequest(req, res, PRODUCT_SERVICE_URL, (path) =>
+    path.replace(/^\/api/, ""),
+  ),
+);
 
 /*
-ORDER SERVICE - /api/orders/* -> http://localhost:3003/orders/*
+ORDER SERVICE 
 */
-app.use("/api/orders", (req, res) => forwardRequest(req, res, ORDER_SERVICE_URL));
+app.use("/api/orders", (req, res) =>
+  forwardRequest(req, res, ORDER_SERVICE_URL, (path) =>
+    path.replace(/^\/api/, ""),
+  ),
+);
 
 /*
 TEST GATEWAY
@@ -73,7 +83,7 @@ app.use((req, res) => {
   });
 });
 
-const PORT = process.env.API_GATEWAY_PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`API Gateway running on port ${PORT}`);
