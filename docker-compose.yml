@@ -5,9 +5,6 @@ services:
     image: "thangtranvan2512/api-gateway:latest"
     ports:
       - "3000:3000"
-    volumes:
-      - ./TLDQ-GO-API-GATEWAY:/app
-      - /app/node_modules
     env_file:
       - ./TLDQ-GO-API-GATEWAY/.env
     depends_on:
@@ -24,9 +21,6 @@ services:
     build: ./TLDQ-GO-USER-SERVICE
     ports:
       - "3001:3001"
-    volumes:
-      - ./TLDQ-GO-USER-SERVICE:/app
-      - /app/node_modules
     env_file:
       - ./TLDQ-GO-USER-SERVICE/.env
     restart: always
@@ -39,9 +33,6 @@ services:
     build: ./TLDQ-GO-PRODUCT-SERVICE
     ports:
       - "3002:3002"
-    volumes:
-      - ./TLDQ-GO-PRODUCT-SERVICE:/app
-      - /app/node_modules
     env_file:
       - ./TLDQ-GO-PRODUCT-SERVICE/.env
     restart: always
@@ -54,9 +45,6 @@ services:
     build: ./TLDQ-GO-ORDER-SERVICE
     ports:
       - "3003:3003"
-    volumes:
-      - ./TLDQ-GO-ORDER-SERVICE:/app
-      - /app/node_modules
     env_file:
       - ./TLDQ-GO-ORDER-SERVICE/.env
     restart: always

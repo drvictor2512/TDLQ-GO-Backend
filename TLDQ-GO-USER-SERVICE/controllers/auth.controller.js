@@ -31,11 +31,21 @@ function validatePassword(password) {
   return typeof password === "string" && password.length >= 6;
 }
 
-async function ensureProfileByRole(userId, role) {
+async function ensureProfileByRole(userId, role, options = {}) {
   if (role === "seller") {
+    const incomingShopName = typeof options.shop_name === "string"
+      ? options.shop_name.trim()
+      : "";
+
     const sellerProfile = await SellerProfile.findOne({ seller_id: userId });
     if (!sellerProfile) {
-      await SellerProfile.create({ seller_id: userId });
+      await SellerProfile.create({
+        seller_id: userId,
+        shop_name: incomingShopName,
+      });
+    } else if (incomingShopName && !sellerProfile.shop_name) {
+      sellerProfile.shop_name = incomingShopName;
+      await sellerProfile.save();
     }
     return;
   }
@@ -80,7 +90,7 @@ async function registerByRole(req, res, role) {
     role,
   });
 
-  await ensureProfileByRole(newUser._id, role);
+  await ensureProfileByRole(newUser._id, role, { shop_name: full_name });
 
   const token = createAccessToken(newUser);
   return res.status(201).json({ message: "Đăng ký thành công", token, user: omitPassword(newUser) });
@@ -213,13 +223,20 @@ exports.upgradeSeller = async (req, res) => {
     }
 
     const { phone, full_name } = req.body || {};
+    const normalizedShopName = typeof full_name === "string" ? full_name.trim() : "";
 
-    user.role = "seller";
+    if (!normalizedShopName) {
+      return res.status(400).json({
+        message: "Tên shop là bắt buộc",
+      });
+    }
+
     if (typeof phone !== "undefined") user.phone = phone;
-    if (typeof full_name !== "undefined") user.full_name = full_name;
+    user.full_name = normalizedShopName;
 
+    await ensureProfileByRole(user._id, "seller", { shop_name: normalizedShopName });
+    user.role = "seller";
     await user.save();
-    await ensureProfileByRole(user._id, "seller");
 
     const token = createAccessToken(user);
     return res.status(200).json({
@@ -378,7 +395,7 @@ exports.adminCreateUser = async (req, res) => {
       avatar_url,
     });
 
-    await ensureProfileByRole(newUser._id, role);
+    await ensureProfileByRole(newUser._id, role, { shop_name: full_name });
 
     return res.status(201).json({ message: "Tạo user thành công", user: omitPassword(newUser) });
   } catch (error) {
@@ -413,7 +430,7 @@ exports.adminUpdateUser = async (req, res) => {
     }
 
     await user.save();
-    await ensureProfileByRole(user._id, user.role);
+    await ensureProfileByRole(user._id, user.role, { shop_name: full_name });
 
     return res.status(200).json({ message: "Cập nhật user thành công", user: omitPassword(user) });
   } catch (error) {
