@@ -26,6 +26,11 @@ const productSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    sold: {
+      // 🔥 thêm dòng này
+      type: Number,
+      default: 0,
+    },
     images: {
       type: [String],
       default: [],

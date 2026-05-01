@@ -12,11 +12,16 @@ const getVoucherDisplayData = async (products) => {
   }
 
   const now = new Date();
-  const sellerIds = [...new Set(productList.map((item) => String(item.seller_id || "")).filter(Boolean))];
+  const sellerIds = [
+    ...new Set(
+      productList.map((item) => String(item.seller_id || "")).filter(Boolean),
+    ),
+  ];
 
   if (sellerIds.length === 0) {
     return productList.map((item) => {
-      const plainItem = typeof item.toObject === "function" ? item.toObject() : { ...item };
+      const plainItem =
+        typeof item.toObject === "function" ? item.toObject() : { ...item };
       const originalPrice = Number(plainItem.price || 0);
 
       return {
@@ -36,7 +41,8 @@ const getVoucherDisplayData = async (products) => {
   }).populate("product_ids", "_id");
 
   return productList.map((item) => {
-    const plainItem = typeof item.toObject === "function" ? item.toObject() : { ...item };
+    const plainItem =
+      typeof item.toObject === "function" ? item.toObject() : { ...item };
     const productId = String(plainItem._id);
     const originalPrice = Number(plainItem.price || 0);
 
@@ -56,7 +62,9 @@ const getVoucherDisplayData = async (products) => {
     });
 
     const selectedVoucher = applicableVouchers.sort((left, right) => {
-      const discountDiff = Number(right.discount_percent || 0) - Number(left.discount_percent || 0);
+      const discountDiff =
+        Number(right.discount_percent || 0) -
+        Number(left.discount_percent || 0);
       if (discountDiff !== 0) {
         return discountDiff;
       }
@@ -66,7 +74,7 @@ const getVoucherDisplayData = async (products) => {
 
     const discountPercent = Number(selectedVoucher?.discount_percent || 0);
     const discountPrice = selectedVoucher
-      ? Math.max(0, Math.round(originalPrice * (100 - discountPercent) / 100))
+      ? Math.max(0, Math.round((originalPrice * (100 - discountPercent)) / 100))
       : originalPrice;
 
     return {
@@ -133,13 +141,12 @@ exports.getProductById = async (req, res) => {
 };
 
 //
-// CREATE PRODUCT
+//
 exports.createProduct = async (req, res) => {
   try {
     const { name, price, stock_quantity, seller_id, category_id, description } =
       req.body;
 
-    // validate
     if (!name || !seller_id) {
       return res.status(400).json({
         message: "Thiếu thông tin bắt buộc",
@@ -172,8 +179,9 @@ exports.createProduct = async (req, res) => {
       stock_quantity,
       seller_id,
       category_id,
-      description, // ✅ thêm
+      description,
       images: imageUrls,
+      sold: 100, // 🔥 thêm dòng này (fake ban đầu)
     });
 
     return res.status(201).json({
