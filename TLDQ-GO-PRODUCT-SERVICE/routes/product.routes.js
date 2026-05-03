@@ -14,6 +14,7 @@ const {
   deleteProduct,
   getProductsBySeller,
   getProductsByCategoryName,
+  updateStock,
 } = require("../controllers/product.controller");
 
 // GET
@@ -31,5 +32,6 @@ router.get("/products/page", getProductsWithPage);
 router.get("/products/seller/:seller_id", getProductsBySeller);
 router.get("/products/category/name/:name", getProductsByCategoryName);
 
+router.patch("/products/:id/stock", updateStock);
 router.get("/products/:id", getProductById);
 module.exports = router;

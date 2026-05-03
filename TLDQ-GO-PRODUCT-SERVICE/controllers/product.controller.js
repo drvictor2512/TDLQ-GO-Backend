@@ -181,7 +181,7 @@ exports.createProduct = async (req, res) => {
       category_id,
       description,
       images: imageUrls,
-      sold: 100, // 🔥 thêm dòng này (fake ban đầu)
+      sold: 0,
     });
 
     return res.status(201).json({
@@ -369,6 +369,50 @@ exports.getProductsByCategoryName = async (req, res) => {
       message: "Lỗi server",
       error: error.message,
     });
+  }
+};
+
+// UPDATE STOCK — internal endpoint called by order-service
+// PATCH /products/:id/stock  body: { stock_delta, sold_delta }
+exports.updateStock = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stock_delta, sold_delta } = req.body;
+
+    const inc = {};
+    if (typeof stock_delta === "number") inc.stock_quantity = stock_delta;
+    if (typeof sold_delta === "number") inc.sold = sold_delta;
+
+    if (Object.keys(inc).length === 0) {
+      return res.status(400).json({ message: "stock_delta hoặc sold_delta là bắt buộc" });
+    }
+
+    // Ngăn tồn kho âm khi giảm: chỉ update nếu stock đủ
+    const filter = { _id: id };
+    if (inc.stock_quantity && inc.stock_quantity < 0) {
+      filter.stock_quantity = { $gte: -inc.stock_quantity };
+    }
+
+    const updated = await Product.findOneAndUpdate(
+      filter,
+      { $inc: inc },
+      { new: true }
+    );
+
+    if (!updated) {
+      const exists = await Product.exists({ _id: id });
+      if (!exists) {
+        return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
+      }
+      return res.status(400).json({ message: "Số lượng tồn kho không đủ" });
+    }
+
+    return res.status(200).json({
+      message: "Cập nhật tồn kho thành công",
+      data: { _id: updated._id, stock_quantity: updated.stock_quantity, sold: updated.sold },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 

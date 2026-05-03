@@ -47,6 +47,9 @@ services:
       - "3003:3003"
     env_file:
       - ./TLDQ-GO-ORDER-SERVICE/.env
+    environment:
+      - USER_SERVICE_URL=http://user:3001
+      - PRODUCT_SERVICE_URL=http://product:3002
     restart: always
     networks:
       - micro-network
