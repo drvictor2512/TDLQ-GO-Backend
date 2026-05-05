@@ -1,4 +1,22 @@
 services:
+  rabbitmq:
+    container_name: rabbitmq
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"    # AMQP port — services dùng để connect
+      - "15672:15672"  # Management UI — truy cập http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - micro-network
+
   api-gateway:
     container_name: api-gateway
     build: ./TLDQ-GO-API-GATEWAY
@@ -35,6 +53,9 @@ services:
       - "3002:3002"
     env_file:
       - ./TLDQ-GO-PRODUCT-SERVICE/.env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: always
     networks:
       - micro-network
@@ -50,6 +71,9 @@ services:
     environment:
       - USER_SERVICE_URL=http://user:3001
       - PRODUCT_SERVICE_URL=http://product:3002
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: always
     networks:
       - micro-network

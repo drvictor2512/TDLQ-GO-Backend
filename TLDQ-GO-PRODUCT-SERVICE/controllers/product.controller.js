@@ -387,24 +387,17 @@ exports.updateStock = async (req, res) => {
       return res.status(400).json({ message: "stock_delta hoặc sold_delta là bắt buộc" });
     }
 
-    // Ngăn tồn kho âm khi giảm: chỉ update nếu stock đủ
-    const filter = { _id: id };
+    // Luôn cập nhật, dùng $max để ngăn stock xuống dưới 0
+    const update = { $inc: inc };
     if (inc.stock_quantity && inc.stock_quantity < 0) {
-      filter.stock_quantity = { $gte: -inc.stock_quantity };
+      // Sau khi $inc, nếu kết quả âm thì clamp về 0
+      update.$max = { stock_quantity: 0 };
     }
 
-    const updated = await Product.findOneAndUpdate(
-      filter,
-      { $inc: inc },
-      { new: true }
-    );
+    const updated = await Product.findByIdAndUpdate(id, update, { new: true });
 
     if (!updated) {
-      const exists = await Product.exists({ _id: id });
-      if (!exists) {
-        return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
-      }
-      return res.status(400).json({ message: "Số lượng tồn kho không đủ" });
+      return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
     }
 
     return res.status(200).json({
