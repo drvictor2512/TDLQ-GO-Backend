@@ -3,6 +3,9 @@ const cloudinary = require("../config/cloudinary");
 const Product = require("../models/product.model");
 const Voucher = require("../models/voucher.model");
 const Category = require("../models/category.model");
+const { cacheGet, cacheSet, cacheDel, cacheDelPattern } = require("../config/redis");
+
+const CACHE_TTL = 300; // 5 phút
 
 const getVoucherDisplayData = async (products) => {
   const productList = Array.isArray(products) ? products : [];
@@ -116,27 +119,22 @@ exports.getAllProducts = async (req, res) => {
 // GET BY ID
 exports.getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).populate(
-      "category_id",
-    );
+    const cacheKey = `product:${req.params.id}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached) return res.status(200).json(cached);
 
+    const product = await Product.findById(req.params.id).populate("category_id");
     if (!product) {
-      return res.status(404).json({
-        message: "Không tìm thấy sản phẩm",
-      });
+      return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
     }
 
     const productsWithVoucher = await getVoucherDisplayData([product]);
+    const payload = { message: "Lấy chi tiết sản phẩm thành công", data: productsWithVoucher[0] };
 
-    return res.status(200).json({
-      message: "Lấy chi tiết sản phẩm thành công",
-      data: productsWithVoucher[0],
-    });
+    await cacheSet(cacheKey, payload, CACHE_TTL);
+    return res.status(200).json(payload);
   } catch (error) {
-    return res.status(500).json({
-      message: "Lỗi server",
-      error: error.message,
-    });
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
@@ -184,17 +182,16 @@ exports.createProduct = async (req, res) => {
       sold: 0,
     });
 
+    // Xóa cache danh sách — sản phẩm mới làm lỗi thời tất cả các trang
+    await cacheDelPattern("products:page:*");
+
     return res.status(201).json({
       message: "Tạo sản phẩm thành công",
       data: newProduct,
     });
   } catch (error) {
     console.error("🔥 Create product error:", error);
-
-    return res.status(500).json({
-      message: "Create product failed",
-      error: error.message,
-    });
+    return res.status(500).json({ message: "Create product failed", error: error.message });
   }
 };
 
@@ -240,39 +237,29 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      message: "Cập nhật sản phẩm thành công",
-      data: updated,
-    });
+    await cacheDel(`product:${id}`);
+    await cacheDelPattern("products:page:*");
+
+    return res.status(200).json({ message: "Cập nhật sản phẩm thành công", data: updated });
   } catch (error) {
-    return res.status(500).json({
-      message: "Lỗi server",
-      error: error.message,
-    });
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
-//
 // DELETE PRODUCT
 exports.deleteProduct = async (req, res) => {
   try {
     const deleted = await Product.findByIdAndDelete(req.params.id);
-
     if (!deleted) {
-      return res.status(404).json({
-        message: "Không tìm thấy sản phẩm",
-      });
+      return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
     }
 
-    return res.status(200).json({
-      message: "Xóa sản phẩm thành công",
-      data: deleted,
-    });
+    await cacheDel(`product:${req.params.id}`);
+    await cacheDelPattern("products:page:*");
+
+    return res.status(200).json({ message: "Xóa sản phẩm thành công", data: deleted });
   } catch (error) {
-    return res.status(500).json({
-      message: "Lỗi server",
-      error: error.message,
-    });
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 
@@ -284,16 +271,18 @@ exports.getProductsWithPage = async (req, res) => {
     page = parseInt(page);
 
     if (page < 1) {
-      return res.status(400).json({
-        message: "Page không hợp lệ",
-      });
+      return res.status(400).json({ message: "Page không hợp lệ" });
+    }
+
+    const cacheKey = `products:page:${page}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached) {
+      return res.status(200).json(cached);
     }
 
     const limit = 10;
     const skip = (page - 1) * limit;
-
     const total = await Product.countDocuments();
-
     const products = await Product.find()
       .populate("category_id")
       .sort({ createdAt: -1 })
@@ -301,23 +290,17 @@ exports.getProductsWithPage = async (req, res) => {
       .limit(limit);
     const productsWithVoucher = await getVoucherDisplayData(products);
 
-    return res.status(200).json({
+    const payload = {
       message: "Lấy sản phẩm theo trang thành công",
       data: productsWithVoucher,
-      pagination: {
-        page,
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        limit,
-      },
-    });
+      pagination: { page, totalPages: Math.ceil(total / limit), totalItems: total, limit },
+    };
+
+    await cacheSet(cacheKey, payload, CACHE_TTL);
+    return res.status(200).json(payload);
   } catch (error) {
     console.error("Get products error:", error);
-
-    return res.status(500).json({
-      message: "Lỗi server",
-      error: error.message,
-    });
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };
 

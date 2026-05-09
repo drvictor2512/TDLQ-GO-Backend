@@ -11,6 +11,7 @@ const app = express();
 const USER_SERVICE_URL = process.env.USER_SERVICE;
 const PRODUCT_SERVICE_URL = process.env.PRODUCT_SERVICE;
 const ORDER_SERVICE_URL = process.env.ORDER_SERVICE;
+const CART_SERVICE_URL = process.env.CART_SERVICE;
 
 app.use(cors());
 app.use(express.json());
@@ -19,6 +20,9 @@ app.use(morgan("dev"));
 
 // Helper function to forward request
 async function forwardRequest(req, res, target, transformPath) {
+  if (!target) {
+    return res.status(503).json({ success: false, message: "Service not configured" });
+  }
   try {
     const incomingPath = req.originalUrl;
     const forwardedPath = transformPath ? transformPath(incomingPath) : incomingPath;
@@ -100,6 +104,15 @@ ORDER SERVICE
 app.use("/api/orders", (req, res) =>
   forwardRequest(req, res, ORDER_SERVICE_URL, (path) =>
     path.replace(/^\/api/, ""),
+  ),
+);
+
+/*
+CART SERVICE
+*/
+app.use("/api/cart", (req, res) =>
+  forwardRequest(req, res, CART_SERVICE_URL, (path) =>
+    path.replace(/^\/api\/cart/, "/cart"),
   ),
 );
 
