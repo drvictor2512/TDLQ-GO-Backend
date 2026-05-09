@@ -764,3 +764,20 @@ exports.updateShopSettings = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+exports.getSellerPublicProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const sellerProfile = await SellerProfile.findOne({ seller_id: id });
+
+    if (!sellerProfile) {
+      return res.status(200).json({
+        data: { shop_name: "Nhà bán", logo_url: null, description: "", rating: 0 },
+      });
+    }
+
+    return res.status(200).json({ data: sellerProfile.toObject() });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};

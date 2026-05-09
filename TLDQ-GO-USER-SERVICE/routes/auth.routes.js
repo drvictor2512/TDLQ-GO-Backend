@@ -105,6 +105,9 @@ router.delete(
   authController.adminDeleteUser,
 );
 
+// Public seller profile — must be before /:id to avoid Express matching "seller" as an id
+router.get("/seller/:id/profile", authController.getSellerPublicProfile);
+
 // Internal route for fetching user info (used by Order Service)
 router.get("/:id", authController.adminGetUserById);
 

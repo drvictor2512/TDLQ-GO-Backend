@@ -8,6 +8,7 @@ const connectDB = require("./config/db");
 const productRoutes = require("./routes/product.routes");
 const categoryRoutes = require("./routes/category.routes");
 const voucherRoutes = require("./routes/voucher.routes");
+const reviewRoutes = require("./routes/review.routes");
 const { startOrderConsumer } = require("./consumers/orderConsumer");
 
 const app = express();
@@ -26,6 +27,7 @@ app.use(morgan("dev"));
 app.use("/", categoryRoutes);
 app.use("/", productRoutes);
 app.use("/", voucherRoutes);
+app.use("/", reviewRoutes);
 
 app.get("/", (req, res) => {
   res.send("Product service running 🚀");
