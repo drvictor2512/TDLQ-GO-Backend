@@ -3,9 +3,14 @@ const cloudinary = require("../config/cloudinary");
 const Product = require("../models/product.model");
 const Voucher = require("../models/voucher.model");
 const Category = require("../models/category.model");
-const { cacheGet, cacheSet, cacheDel, cacheDelPattern } = require("../config/redis");
+const {
+  cacheGet,
+  cacheSet,
+  cacheDel,
+  cacheDelPattern,
+} = require("../config/redis");
 
-const CACHE_TTL = 300; // 5 phút
+const CACHE_TTL = 5; // 0.5s
 
 const getVoucherDisplayData = async (products) => {
   const productList = Array.isArray(products) ? products : [];
@@ -123,18 +128,25 @@ exports.getProductById = async (req, res) => {
     const cached = await cacheGet(cacheKey);
     if (cached) return res.status(200).json(cached);
 
-    const product = await Product.findById(req.params.id).populate("category_id");
+    const product = await Product.findById(req.params.id).populate(
+      "category_id",
+    );
     if (!product) {
       return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
     }
 
     const productsWithVoucher = await getVoucherDisplayData([product]);
-    const payload = { message: "Lấy chi tiết sản phẩm thành công", data: productsWithVoucher[0] };
+    const payload = {
+      message: "Lấy chi tiết sản phẩm thành công",
+      data: productsWithVoucher[0],
+    };
 
     await cacheSet(cacheKey, payload, CACHE_TTL);
     return res.status(200).json(payload);
   } catch (error) {
-    return res.status(500).json({ message: "Lỗi server", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Lỗi server", error: error.message });
   }
 };
 
@@ -180,6 +192,7 @@ exports.createProduct = async (req, res) => {
       description,
       images: imageUrls,
       sold: 0,
+      status: "approved",
     });
 
     // Xóa cache danh sách — sản phẩm mới làm lỗi thời tất cả các trang
@@ -191,7 +204,9 @@ exports.createProduct = async (req, res) => {
     });
   } catch (error) {
     console.error("🔥 Create product error:", error);
-    return res.status(500).json({ message: "Create product failed", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Create product failed", error: error.message });
   }
 };
 
@@ -240,9 +255,13 @@ exports.updateProduct = async (req, res) => {
     await cacheDel(`product:${id}`);
     await cacheDelPattern("products:page:*");
 
-    return res.status(200).json({ message: "Cập nhật sản phẩm thành công", data: updated });
+    return res
+      .status(200)
+      .json({ message: "Cập nhật sản phẩm thành công", data: updated });
   } catch (error) {
-    return res.status(500).json({ message: "Lỗi server", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Lỗi server", error: error.message });
   }
 };
 
@@ -257,9 +276,13 @@ exports.deleteProduct = async (req, res) => {
     await cacheDel(`product:${req.params.id}`);
     await cacheDelPattern("products:page:*");
 
-    return res.status(200).json({ message: "Xóa sản phẩm thành công", data: deleted });
+    return res
+      .status(200)
+      .json({ message: "Xóa sản phẩm thành công", data: deleted });
   } catch (error) {
-    return res.status(500).json({ message: "Lỗi server", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Lỗi server", error: error.message });
   }
 };
 
@@ -274,33 +297,51 @@ exports.getProductsWithPage = async (req, res) => {
       return res.status(400).json({ message: "Page không hợp lệ" });
     }
 
-    const cacheKey = `products:page:${page}`;
+    const cacheKey = `products:page:${page}:approved`;
     const cached = await cacheGet(cacheKey);
+
     if (cached) {
       return res.status(200).json(cached);
     }
 
     const limit = 10;
     const skip = (page - 1) * limit;
-    const total = await Product.countDocuments();
-    const products = await Product.find()
+
+    // 🔥 CHỈ LẤY PRODUCT ĐÃ APPROVED
+    const filter = {
+      status: "approved",
+    };
+
+    const total = await Product.countDocuments(filter);
+
+    const products = await Product.find(filter)
       .populate("category_id")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
+
     const productsWithVoucher = await getVoucherDisplayData(products);
 
     const payload = {
       message: "Lấy sản phẩm theo trang thành công",
       data: productsWithVoucher,
-      pagination: { page, totalPages: Math.ceil(total / limit), totalItems: total, limit },
+      pagination: {
+        page,
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        limit,
+      },
     };
 
     await cacheSet(cacheKey, payload, CACHE_TTL);
+
     return res.status(200).json(payload);
   } catch (error) {
     console.error("Get products error:", error);
-    return res.status(500).json({ message: "Lỗi server", error: error.message });
+    return res.status(500).json({
+      message: "Lỗi server",
+      error: error.message,
+    });
   }
 };
 
@@ -367,7 +408,9 @@ exports.updateStock = async (req, res) => {
     if (typeof sold_delta === "number") inc.sold = sold_delta;
 
     if (Object.keys(inc).length === 0) {
-      return res.status(400).json({ message: "stock_delta hoặc sold_delta là bắt buộc" });
+      return res
+        .status(400)
+        .json({ message: "stock_delta hoặc sold_delta là bắt buộc" });
     }
 
     // Luôn cập nhật, dùng $max để ngăn stock xuống dưới 0
@@ -385,10 +428,16 @@ exports.updateStock = async (req, res) => {
 
     return res.status(200).json({
       message: "Cập nhật tồn kho thành công",
-      data: { _id: updated._id, stock_quantity: updated.stock_quantity, sold: updated.sold },
+      data: {
+        _id: updated._id,
+        stock_quantity: updated.stock_quantity,
+        sold: updated.sold,
+      },
     });
   } catch (error) {
-    return res.status(500).json({ message: "Lỗi server", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Lỗi server", error: error.message });
   }
 };
 
