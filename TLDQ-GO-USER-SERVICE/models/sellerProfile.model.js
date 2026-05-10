@@ -8,7 +8,7 @@ const sellerProfileSchema = new mongoose.Schema({
   },
   shop_name: {
     type: String,
-    required: function() { return this._id != null; }
+    default: "",
   },
   description: String,
   address_line: String,

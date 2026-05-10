@@ -13,13 +13,15 @@ const {
   updateProduct,
   deleteProduct,
   getProductsBySeller,
+  getProductsByCategoryName,
+  updateStock,
 } = require("../controllers/product.controller");
 
 // GET
 router.get("/products", getAllProducts);
 
 // PUT
-router.put("/products/:id", updateProduct);
+router.put("/products/:id", upload.single("image"), updateProduct);
 
 // DELETE
 router.delete("/products/:id", deleteProduct);
@@ -28,6 +30,8 @@ router.delete("/products/:id", deleteProduct);
 router.post("/products", upload.array("images", 5), createProduct);
 router.get("/products/page", getProductsWithPage);
 router.get("/products/seller/:seller_id", getProductsBySeller);
+router.get("/products/category/name/:name", getProductsByCategoryName);
 
+router.patch("/products/:id/stock", updateStock);
 router.get("/products/:id", getProductById);
 module.exports = router;

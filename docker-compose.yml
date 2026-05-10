@@ -1,19 +1,50 @@
 services:
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - micro-network
+
+  rabbitmq:
+    container_name: rabbitmq
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"    # AMQP port — services dùng để connect
+      - "15672:15672"  # Management UI — truy cập http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - micro-network
+
   api-gateway:
     container_name: api-gateway
     build: ./TLDQ-GO-API-GATEWAY
     image: "thangtranvan2512/api-gateway:latest"
     ports:
       - "3000:3000"
-    volumes:
-      - ./TLDQ-GO-API-GATEWAY:/app
-      - /app/node_modules
     env_file:
       - ./TLDQ-GO-API-GATEWAY/.env
     depends_on:
       - user
       - product
       - order
+      - cart
     restart: always
     networks:
       - micro-network
@@ -24,9 +55,6 @@ services:
     build: ./TLDQ-GO-USER-SERVICE
     ports:
       - "3001:3001"
-    volumes:
-      - ./TLDQ-GO-USER-SERVICE:/app
-      - /app/node_modules
     env_file:
       - ./TLDQ-GO-USER-SERVICE/.env
     restart: always
@@ -39,11 +67,32 @@ services:
     build: ./TLDQ-GO-PRODUCT-SERVICE
     ports:
       - "3002:3002"
-    volumes:
-      - ./TLDQ-GO-PRODUCT-SERVICE:/app
-      - /app/node_modules
     env_file:
       - ./TLDQ-GO-PRODUCT-SERVICE/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - micro-network
+
+  cart:
+    container_name: cart-service
+    image: "thangtranvan2512/cart-service:latest"
+    build: ./TLDQ-GO-CART-SERVICE
+    ports:
+      - "3004:3004"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - CART_SERVICE_PORT=3004
+      - PRODUCT_SERVICE_URL=http://product:3002
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: always
     networks:
       - micro-network
@@ -54,11 +103,14 @@ services:
     build: ./TLDQ-GO-ORDER-SERVICE
     ports:
       - "3003:3003"
-    volumes:
-      - ./TLDQ-GO-ORDER-SERVICE:/app
-      - /app/node_modules
     env_file:
       - ./TLDQ-GO-ORDER-SERVICE/.env
+    environment:
+      - USER_SERVICE_URL=http://user:3001
+      - PRODUCT_SERVICE_URL=http://product:3002
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: always
     networks:
       - micro-network

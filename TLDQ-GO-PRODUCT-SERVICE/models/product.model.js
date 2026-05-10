@@ -26,6 +26,11 @@ const productSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    sold: {
+      // 🔥 thêm dòng này
+      type: Number,
+      default: 0,
+    },
     images: {
       type: [String],
       default: [],
@@ -35,6 +40,11 @@ const productSchema = new mongoose.Schema(
     description: {
       type: String,
       default: "",
+    },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "approved",
     },
   },
   { timestamps: true },
