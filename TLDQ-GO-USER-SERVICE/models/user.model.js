@@ -30,4 +30,21 @@ const userSchema = new mongoose.Schema({
   reset_password_expires: Date,
 });
 
+userSchema.virtual("customerProfile", {
+  ref: "CustomerProfile",
+  localField: "_id",
+  foreignField: "user_id",
+  justOne: true,
+});
+
+userSchema.virtual("sellerProfile", {
+  ref: "SellerProfile",
+  localField: "_id",
+  foreignField: "seller_id",
+  justOne: true,
+});
+
+userSchema.set("toJSON", { virtuals: true });
+userSchema.set("toObject", { virtuals: true });
+
 module.exports = mongoose.model("User", userSchema);
