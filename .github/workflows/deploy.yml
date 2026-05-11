@@ -11,9 +11,12 @@ jobs:
       user: ${{ steps.filter.outputs.user }}
       product: ${{ steps.filter.outputs.product }}
       order: ${{ steps.filter.outputs.order }}
+      cart: ${{ steps.filter.outputs.cart }}
       gateway: ${{ steps.filter.outputs.gateway }}
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -21,11 +24,13 @@ jobs:
             user: 'TLDQ-GO-USER-SERVICE/**'
             product: 'TLDQ-GO-PRODUCT-SERVICE/**'
             order: 'TLDQ-GO-ORDER-SERVICE/**'
+            cart: 'TLDQ-GO-CART-SERVICE/**'
             gateway: 'TLDQ-GO-API-GATEWAY/**'
 
   build-and-deploy:
     needs: changes
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -35,45 +40,49 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # --- CHỈ BUILD USER NẾU CÓ THAY ĐỔI ---
       - name: Build & Push User
         if: needs.changes.outputs.user == 'true'
         run: |
           docker build -t thangtranvan2512/user-service:latest ./TLDQ-GO-USER-SERVICE
           docker push thangtranvan2512/user-service:latest
 
-      # --- CHỈ BUILD PRODUCT NẾU CÓ THAY ĐỔI ---
       - name: Build & Push Product
         if: needs.changes.outputs.product == 'true'
         run: |
           docker build -t thangtranvan2512/product-service:latest ./TLDQ-GO-PRODUCT-SERVICE
           docker push thangtranvan2512/product-service:latest
 
-      # --- CHỈ BUILD ORDER NẾU CÓ THAY ĐỔI ---
       - name: Build & Push Order
         if: needs.changes.outputs.order == 'true'
         run: |
           docker build -t thangtranvan2512/order-service:latest ./TLDQ-GO-ORDER-SERVICE
           docker push thangtranvan2512/order-service:latest
 
-      # --- CHỈ BUILD GATEWAY NẾU CÓ THAY ĐỔI ---
+      - name: Build & Push Cart
+        if: needs.changes.outputs.cart == 'true'
+        run: |
+          docker build -t thangtranvan2512/cart-service:latest ./TLDQ-GO-CART-SERVICE
+          docker push thangtranvan2512/cart-service:latest
+
       - name: Build & Push Gateway
         if: needs.changes.outputs.gateway == 'true'
         run: |
           docker build -t thangtranvan2512/api-gateway:latest ./TLDQ-GO-API-GATEWAY
           docker push thangtranvan2512/api-gateway:latest
 
-      # --- DEPLOY LÊN EC2 ---
       - name: SSH to EC2 & Update Services
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd ~/app-deploy
-            # Dùng đúng tên service trong docker-compose (tương ứng NAMES trong docker ps)
-            ${{ needs.changes.outputs.user == 'true' && 'docker compose pull user && docker compose up -d user' || '' }}
-            ${{ needs.changes.outputs.product == 'true' && 'docker compose pull product && docker compose up -d product' || '' }}
-            ${{ needs.changes.outputs.order == 'true' && 'docker compose pull order && docker compose up -d order' || '' }}
-            ${{ needs.changes.outputs.gateway == 'true' && 'docker compose pull api-gateway && docker compose up -d api-gateway' || '' }}
+
+            ${{ needs.changes.outputs.user == 'true' && 'docker compose pull user && docker compose up -d --no-deps user' || '' }}
+            ${{ needs.changes.outputs.product == 'true' && 'docker compose pull product && docker compose up -d --no-deps product' || '' }}
+            ${{ needs.changes.outputs.order == 'true' && 'docker compose pull order && docker compose up -d --no-deps order' || '' }}
+            ${{ needs.changes.outputs.cart == 'true' && 'docker compose pull cart && docker compose up -d --no-deps cart' || '' }}
+            ${{ needs.changes.outputs.gateway == 'true' && 'docker compose pull api-gateway && docker compose up -d --no-deps api-gateway' || '' }}
+
+            docker image prune -f
