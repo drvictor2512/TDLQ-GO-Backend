@@ -65,7 +65,7 @@ jobs:
 
       # --- DEPLOY LÊN EC2 ---
       - name: SSH to EC2 & Update Services
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
