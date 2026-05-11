@@ -3,11 +3,35 @@ const router = express.Router();
 
 const authController = require("../controllers/auth.controller");
 const authMiddleware = require("../middlewares/auth.middleware");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
+// Multer storage config
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadPath = "uploads/";
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    }
+    cb(null, uploadPath);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, "avatar-" + uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+});
 
 // Backward-compatible auth routes
 router.post("/register", authController.register);
 router.post("/login", authController.login);
 router.get("/me", authMiddleware, authController.getProfile);
+router.post("/upload-avatar", authMiddleware, upload.single("avatar"), authController.uploadAvatar);
 
 // User flow
 router.post("/user/register", authController.registerUser);
@@ -15,13 +39,13 @@ router.post("/user/login", authController.loginUser);
 router.post(
   "/user/change-password",
   authMiddleware,
-  authMiddleware.requireRoles("customer"),
+  authMiddleware.requireRoles("customer", "seller"),
   authController.changePasswordUser,
 );
 router.put(
   "/user/profile",
   authMiddleware,
-  authMiddleware.requireRoles("customer"),
+  authMiddleware.requireRoles("customer", "seller"),
   authController.updateProfile,
 );
 

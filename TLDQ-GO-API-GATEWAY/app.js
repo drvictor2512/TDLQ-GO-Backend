@@ -90,6 +90,35 @@ USER SERVICE
 app.use("/api/users", (req, res) => forwardRequest(req, res, USER_SERVICE_URL));
 
 /*
+IMAGE SERVING
+*/
+app.use("/uploads", async (req, res) => {
+  try {
+    const targetUrl = `${USER_SERVICE_URL}${req.originalUrl}`;
+    const response = await axios({
+      method: req.method,
+      url: targetUrl,
+      headers: { ...req.headers, host: new URL(USER_SERVICE_URL).host },
+      responseType: "stream",
+    });
+
+    res.status(response.status);
+    Object.keys(response.headers).forEach((key) => {
+      res.setHeader(key, response.headers[key]);
+    });
+
+    response.data.pipe(res);
+  } catch (error) {
+    if (error.response && error.response.data && typeof error.response.data.pipe === "function") {
+      res.status(error.response.status);
+      error.response.data.pipe(res);
+    } else {
+      res.status(404).send("Not Found");
+    }
+  }
+});
+
+/*
 PRODUCT SERVICE 
 */
 app.use("/api/products", (req, res) =>

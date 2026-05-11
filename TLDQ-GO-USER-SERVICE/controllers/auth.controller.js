@@ -5,8 +5,25 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const emailService = require("../services/email.service");
 
+const fs = require("fs");
+const path = require("path");
+
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const USER_ROLES = ["customer", "seller", "admin"];
+
+const deleteOldFile = (fileUrl) => {
+  if (fileUrl && fileUrl.startsWith("/uploads/")) {
+    const filePath = path.join(__dirname, "..", fileUrl);
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+        console.log(`Deleted old file: ${filePath}`);
+      } catch (err) {
+        console.error(`Error deleting old file: ${err.message}`);
+      }
+    }
+  }
+};
 
 function omitPassword(userDoc) {
   const user = userDoc.toObject ? userDoc.toObject() : userDoc;
@@ -46,6 +63,12 @@ async function ensureProfileByRole(userId, role, options = {}) {
     } else if (incomingShopName && !sellerProfile.shop_name) {
       sellerProfile.shop_name = incomingShopName;
       await sellerProfile.save();
+    }
+
+    // Also ensure customer profile for sellers
+    const customerProfile = await CustomerProfile.findOne({ user_id: userId });
+    if (!customerProfile) {
+      await CustomerProfile.create({ user_id: userId });
     }
     return;
   }
@@ -92,8 +115,22 @@ async function registerByRole(req, res, role) {
 
   await ensureProfileByRole(newUser._id, role, { shop_name: full_name });
 
+  let profileData = null;
+  if (role === "seller") {
+    profileData = await SellerProfile.findOne({ seller_id: newUser._id });
+  } else if (role === "customer") {
+    profileData = await CustomerProfile.findOne({ user_id: newUser._id });
+  }
+
   const token = createAccessToken(newUser);
-  return res.status(201).json({ message: "Đăng ký thành công", token, user: omitPassword(newUser) });
+  
+  const userResponse = {
+    ...omitPassword(newUser),
+    sellerProfile: role === "seller" && profileData ? profileData.toObject() : undefined,
+    customerProfile: role === "customer" && profileData ? profileData.toObject() : undefined,
+  };
+
+  return res.status(201).json({ message: "Đăng ký thành công", token, user: userResponse });
 }
 
 async function loginByRole(req, res, acceptedRoles) {
@@ -119,8 +156,24 @@ async function loginByRole(req, res, acceptedRoles) {
     return res.status(400).json({ message: "Email hoặc password không đúng" });
   }
 
+  await ensureProfileByRole(user._id, user.role);
+
+  let profileData = null;
+  if (user.role === "seller") {
+    profileData = await SellerProfile.findOne({ seller_id: user._id });
+  } else if (user.role === "customer") {
+    profileData = await CustomerProfile.findOne({ user_id: user._id });
+  }
+
   const token = createAccessToken(user);
-  return res.status(200).json({ message: "Đăng nhập thành công", token, user: omitPassword(user) });
+  
+  const userResponse = {
+    ...omitPassword(user),
+    sellerProfile: user.role === "seller" && profileData ? profileData.toObject() : undefined,
+    customerProfile: user.role === "customer" && profileData ? profileData.toObject() : undefined,
+  };
+
+  return res.status(200).json({ message: "Đăng nhập thành công", token, user: userResponse });
 }
 
 exports.register = async (req, res) => {
@@ -151,7 +204,7 @@ exports.registerUser = async (req, res) => {
 
 exports.loginUser = async (req, res) => {
   try {
-    return await loginByRole(req, res, ["customer"]);
+    return await loginByRole(req, res, ["customer", "seller"]);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -159,7 +212,7 @@ exports.loginUser = async (req, res) => {
 
 exports.changePasswordUser = async (req, res) => {
   try {
-    if (req.userRole !== "customer") {
+    if (req.userRole !== "customer" && req.userRole !== "seller") {
       return res.status(403).json({ message: "Forbidden" });
     }
 
@@ -174,7 +227,7 @@ exports.changePasswordUser = async (req, res) => {
     }
 
     const user = await User.findById(req.userId);
-    if (!user || user.role !== "customer") {
+    if (!user || (user.role !== "customer" && user.role !== "seller")) {
       return res.status(404).json({ message: "Người dùng không tồn tại" });
     }
 
@@ -553,8 +606,8 @@ exports.resetPassword = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
   try {
-    if (req.userRole !== "customer") {
-      return res.status(403).json({ message: "Chỉ tài khoản customer mới có thể cập nhật profile bằng endpoint này" });
+    if (req.userRole !== "customer" && req.userRole !== "seller") {
+      return res.status(403).json({ message: "Chỉ tài khoản customer hoặc seller mới có thể cập nhật profile bằng endpoint này" });
     }
 
     const userId = req.userId;
@@ -567,7 +620,12 @@ exports.updateProfile = async (req, res) => {
 
     if (typeof full_name !== "undefined") user.full_name = full_name;
     if (typeof phone !== "undefined") user.phone = phone;
-    if (typeof avatar_url !== "undefined") user.avatar_url = avatar_url;
+    if (typeof avatar_url !== "undefined") {
+      if (user.avatar_url && user.avatar_url !== avatar_url) {
+        deleteOldFile(user.avatar_url);
+      }
+      user.avatar_url = avatar_url;
+    }
     await user.save();
 
     if (typeof address_line !== "undefined") {
@@ -746,8 +804,18 @@ exports.updateShopSettings = async (req, res) => {
     if (typeof address_line !== "undefined") sellerProfile.address_line = address_line;
     if (typeof shop_email !== "undefined") sellerProfile.shop_email = shop_email;
     if (typeof shop_phone !== "undefined") sellerProfile.shop_phone = shop_phone;
-    if (typeof logo_url !== "undefined") sellerProfile.logo_url = logo_url;
-    if (typeof banner_url !== "undefined") sellerProfile.banner_url = banner_url;
+    if (typeof logo_url !== "undefined") {
+      if (sellerProfile.logo_url && sellerProfile.logo_url !== logo_url) {
+        deleteOldFile(sellerProfile.logo_url);
+      }
+      sellerProfile.logo_url = logo_url;
+    }
+    if (typeof banner_url !== "undefined") {
+      if (sellerProfile.banner_url && sellerProfile.banner_url !== banner_url) {
+        deleteOldFile(sellerProfile.banner_url);
+      }
+      sellerProfile.banner_url = banner_url;
+    }
     if (typeof operating_hours !== "undefined") sellerProfile.operating_hours = operating_hours;
     if (typeof shipping_policy !== "undefined") sellerProfile.shipping_policy = shipping_policy;
     if (typeof return_policy !== "undefined") sellerProfile.return_policy = return_policy;
@@ -779,5 +847,24 @@ exports.getSellerPublicProfile = async (req, res) => {
     return res.status(200).json({ data: sellerProfile.toObject() });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+};
+
+exports.uploadAvatar = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Vui lòng chọn ảnh để tải lên" });
+    }
+
+    // Return the relative path
+    // In production, you might want to return the full URL
+    const filePath = `/uploads/${req.file.filename}`;
+    return res.status(200).json({
+      message: "Tải ảnh lên thành công",
+      url: filePath,
+      avatar_url: filePath,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 };
