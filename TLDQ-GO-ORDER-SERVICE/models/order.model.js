@@ -25,6 +25,7 @@ const orderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        "awaiting_payment",
         "pending",
         "confirmed",
         "preparing",
@@ -48,8 +49,17 @@ const orderSchema = new mongoose.Schema(
     },
     payment_method: {
       type: String,
-      enum: ["COD", "BankTransfer"],
+      enum: ["COD", "BankTransfer", "VNPay"],
       default: "COD",
+    },
+    payment_status: {
+      type: String,
+      enum: ["pending", "paid", "failed"],
+      default: "pending",
+    },
+    vnpay_txn_ref: {
+      type: String,
+      default: null,
     },
   },
   { timestamps: true },

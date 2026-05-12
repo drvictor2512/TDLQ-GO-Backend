@@ -1,8 +1,21 @@
+const { VNPay, ignoreLogger, ProductCode, VnpLocale } = require("vnpay");
 const Order = require("../models/order.model");
 const { publishEvent } = require("../config/rabbitmq");
 
 const USER_SERVICE_URL = process.env.USER_SERVICE_URL || "http://user:3001";
 const PRODUCT_SERVICE_URL = process.env.PRODUCT_SERVICE_URL || "http://product:3002";
+
+const VNPAY_RETURN_URL = process.env.VNPAY_RETURN_URL || "http://localhost:5173/thanh-toan/ket-qua";
+
+const vnpay = new VNPay({
+  tmnCode: process.env.VNPAY_TMN_CODE || "",
+  secureSecret: process.env.VNPAY_HASH_SECRET || "",
+  vnpayHost: "https://sandbox.vnpayment.vn",
+  testMode: true,
+  hashAlgorithm: "SHA512",
+  enableLog: false,
+  loggerFn: ignoreLogger,
+});
 
 const PERIOD_MS = {
   "7days":   7   * 24 * 60 * 60 * 1000,
@@ -121,6 +134,16 @@ exports.getOrders = async (req, res) => {
   }
 };
 
+exports.getOrdersByCustomer = async (req, res) => {
+  try {
+    const { customer_id } = req.params;
+    const orders = await Order.find({ customer_id }).sort({ createdAt: -1 });
+    return res.status(200).json({ success: true, data: orders });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.getOrdersBySeller = async (req, res) => {
   try {
     const seller_id = req.params.seller_id;
@@ -140,6 +163,7 @@ exports.updateOrderStatus = async (req, res) => {
     const { status } = req.body;
 
     const validStatuses = [
+      "awaiting_payment",
       "pending",
       "confirmed",
       "preparing",
@@ -423,6 +447,168 @@ exports.getAdminStats = async (req, res) => {
       top_products: result.top_products || [],
       status_distribution: result.status_distribution || [],
     });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// POST /orders/vnpay/create-payment
+exports.createVNPayPayment = async (req, res) => {
+  try {
+    const {
+      customer_id,
+      items,
+      shipping_address,
+      receiver_name,
+      phone_number,
+    } = req.body;
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ message: "Order items cannot be empty" });
+    }
+
+    const userRes = await fetch(`${USER_SERVICE_URL}/api/users/${customer_id}`);
+    if (!userRes.ok) {
+      return res.status(400).json({ message: "Invalid customer_id or user not found" });
+    }
+
+    let total_amount = 0;
+    const validatedItems = [];
+    let detected_seller_id = req.body.seller_id || null;
+
+    for (const item of items) {
+      const productRes = await fetch(`${PRODUCT_SERVICE_URL}/products/${item.product_id}`);
+      if (!productRes.ok) {
+        return res.status(400).json({ message: `Product ${item.product_id} not found` });
+      }
+
+      const productData = await productRes.json();
+      const product = productData.data;
+
+      if (!product) {
+        return res.status(400).json({ message: `Product ${item.product_id} data invalid` });
+      }
+
+      if (product.stock_quantity < item.quantity) {
+        return res.status(400).json({
+          message: `Sản phẩm "${product.name}" không đủ tồn kho. Hiện còn ${product.stock_quantity} sản phẩm.`,
+        });
+      }
+
+      if (!detected_seller_id && product.seller_id) {
+        detected_seller_id = product.seller_id;
+      }
+
+      const unitPrice = product.discount_price ?? product.price;
+      validatedItems.push({
+        product_id: product._id,
+        product_name: product.name,
+        quantity: item.quantity,
+        price: unitPrice,
+      });
+      total_amount += item.quantity * unitPrice;
+    }
+
+    if (!detected_seller_id) {
+      return res.status(400).json({ message: "Không xác định được seller của sản phẩm" });
+    }
+
+    const newOrder = await Order.create({
+      customer_id,
+      seller_id: detected_seller_id,
+      items: validatedItems,
+      total_amount,
+      shipping_address,
+      receiver_name,
+      phone_number,
+      payment_method: "VNPay",
+      status: "awaiting_payment",
+      payment_status: "pending",
+    });
+
+    const ipAddr =
+      req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+      req.socket?.remoteAddress ||
+      "127.0.0.1";
+
+    const paymentUrl = vnpay.buildPaymentUrl({
+      vnp_Amount: total_amount,
+      vnp_IpAddr: ipAddr,
+      vnp_TxnRef: newOrder._id.toString(),
+      vnp_OrderInfo: `Thanh toan don hang ${newOrder._id}`,
+      vnp_OrderType: ProductCode.Other,
+      vnp_ReturnUrl: VNPAY_RETURN_URL,
+      vnp_Locale: VnpLocale.VN,
+    });
+
+    return res.status(201).json({
+      success: true,
+      orderId: newOrder._id.toString(),
+      paymentUrl,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// GET /orders/vnpay/verify?vnp_TxnRef=...&vnp_ResponseCode=...&...
+exports.verifyVNPayPayment = async (req, res) => {
+  try {
+    const query = req.query;
+
+    const verify = vnpay.verifyReturnUrl(query);
+    if (!verify.isVerified) {
+      return res.status(400).json({ success: false, message: "Chữ ký không hợp lệ" });
+    }
+
+    const orderId = query.vnp_TxnRef;
+    const responseCode = query.vnp_ResponseCode;
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
+    }
+
+    // Idempotency guard: already processed
+    if (order.payment_status !== "pending") {
+      return res.status(200).json({
+        success: order.payment_status === "paid",
+        message: "Đơn hàng đã được xử lý trước đó",
+        order,
+      });
+    }
+
+    if (responseCode === "00") {
+      order.payment_status = "paid";
+      order.status = "pending";
+      order.vnpay_txn_ref = query.vnp_TransactionNo || null;
+      await order.save();
+
+      publishEvent("order.created", {
+        order_id: order._id.toString(),
+        items: order.items.map((i) => ({
+          product_id: i.product_id.toString(),
+          quantity: i.quantity,
+        })),
+        timestamp: new Date().toISOString(),
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Thanh toán thành công",
+        order,
+      });
+    } else {
+      order.payment_status = "failed";
+      order.status = "cancelled";
+      await order.save();
+
+      return res.status(200).json({
+        success: false,
+        message: "Thanh toán thất bại hoặc bị huỷ",
+        order,
+      });
+    }
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

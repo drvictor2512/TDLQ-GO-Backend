@@ -108,6 +108,8 @@ services:
     environment:
       - USER_SERVICE_URL=http://user:3001
       - PRODUCT_SERVICE_URL=http://product:3002
+      - VNPAY_PAYMENT_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+      - VNPAY_RETURN_URL=http://localhost:5173/thanh-toan/ket-qua
     depends_on:
       rabbitmq:
         condition: service_healthy
