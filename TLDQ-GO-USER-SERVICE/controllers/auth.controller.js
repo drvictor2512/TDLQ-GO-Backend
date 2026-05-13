@@ -4,6 +4,7 @@ const CustomerProfile = require("../models/customerProfile.model");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const emailService = require("../services/email.service");
+const cloudinary = require("../config/cloudinary");
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const USER_ROLES = ["customer", "seller", "admin"];
@@ -31,21 +32,63 @@ function validatePassword(password) {
   return typeof password === "string" && password.length >= 6;
 }
 
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getFirstFile(files, fieldName) {
+  if (!files || !files[fieldName]) {
+    return null;
+  }
+
+  return Array.isArray(files[fieldName]) ? files[fieldName][0] : files[fieldName];
+}
+
+function uploadBufferToCloudinary(file, folder) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: "image" },
+      (error, result) => {
+        if (error) {
+          return reject(error);
+        }
+
+        return resolve(result.secure_url);
+      },
+    );
+
+    stream.end(file.buffer);
+  });
+}
+
 async function ensureProfileByRole(userId, role, options = {}) {
   if (role === "seller") {
-    const incomingShopName = typeof options.shop_name === "string"
-      ? options.shop_name.trim()
-      : "";
+    const incomingShopName = normalizeText(options.shop_name);
+    const incomingAddressLine = normalizeText(options.address_line);
 
     const sellerProfile = await SellerProfile.findOne({ seller_id: userId });
     if (!sellerProfile) {
       await SellerProfile.create({
         seller_id: userId,
         shop_name: incomingShopName,
+        address_line: incomingAddressLine,
       });
-    } else if (incomingShopName && !sellerProfile.shop_name) {
-      sellerProfile.shop_name = incomingShopName;
-      await sellerProfile.save();
+    } else {
+      let shouldSave = false;
+
+      if (incomingShopName && !sellerProfile.shop_name) {
+        sellerProfile.shop_name = incomingShopName;
+        shouldSave = true;
+      }
+
+      if (incomingAddressLine && !sellerProfile.address_line) {
+        sellerProfile.address_line = incomingAddressLine;
+        shouldSave = true;
+      }
+
+      if (shouldSave) {
+        await sellerProfile.save();
+      }
     }
     return;
   }
@@ -59,9 +102,12 @@ async function ensureProfileByRole(userId, role, options = {}) {
 }
 
 async function registerByRole(req, res, role) {
-  const { email, password, phone, full_name } = req.body || {};
+  const { email, password, phone, full_name, shop_name, address_line } = req.body || {};
 
   const normalizedEmail = normalizeEmail(email);
+  const normalizedFullName = normalizeText(full_name);
+  const normalizedShopName = normalizeText(shop_name);
+  const normalizedAddressLine = normalizeText(address_line);
 
   if (!normalizedEmail || !password) {
     return res.status(400).json({ message: "Email và password là bắt buộc" });
@@ -75,6 +121,14 @@ async function registerByRole(req, res, role) {
     return res.status(400).json({ message: "Password phải có ít nhất 6 ký tự" });
   }
 
+  if (!normalizedFullName) {
+    return res.status(400).json({ message: "TÃªn hiá»ƒn thá»‹ lÃ  báº¯t buá»™c" });
+  }
+
+  if (role === "seller" && !normalizedShopName) {
+    return res.status(400).json({ message: "TÃªn cá»­a hÃ ng lÃ  báº¯t buá»™c" });
+  }
+
   const existingUser = await User.findOne({ email: normalizedEmail });
   if (existingUser) {
     return res.status(409).json({ message: "Email đã tồn tại" });
@@ -86,11 +140,14 @@ async function registerByRole(req, res, role) {
     email: normalizedEmail,
     password_hash: hashedPassword,
     phone,
-    full_name,
+    full_name: normalizedFullName,
     role,
   });
 
-  await ensureProfileByRole(newUser._id, role, { shop_name: full_name });
+  await ensureProfileByRole(newUser._id, role, {
+    shop_name: role === "seller" ? normalizedShopName : "",
+    address_line: normalizedAddressLine,
+  });
 
   const token = createAccessToken(newUser);
   return res.status(201).json({ message: "Đăng ký thành công", token, user: omitPassword(newUser) });
@@ -222,8 +279,16 @@ exports.upgradeSeller = async (req, res) => {
       });
     }
 
-    const { phone, full_name } = req.body || {};
-    const normalizedShopName = typeof full_name === "string" ? full_name.trim() : "";
+    const { phone, full_name, shop_name, address_line } = req.body || {};
+    const normalizedFullName = normalizeText(full_name) || normalizeText(user.full_name);
+    const normalizedShopName = normalizeText(shop_name);
+    const normalizedAddressLine = normalizeText(address_line);
+
+    if (!normalizedFullName) {
+      return res.status(400).json({
+        message: "Tên hiển thị là bắt buộc",
+      });
+    }
 
     if (!normalizedShopName) {
       return res.status(400).json({
@@ -232,9 +297,22 @@ exports.upgradeSeller = async (req, res) => {
     }
 
     if (typeof phone !== "undefined") user.phone = phone;
-    user.full_name = normalizedShopName;
+    user.full_name = normalizedFullName;
 
-    await ensureProfileByRole(user._id, "seller", { shop_name: normalizedShopName });
+    await ensureProfileByRole(user._id, "seller", {
+      shop_name: normalizedShopName,
+      address_line: normalizedAddressLine,
+    });
+
+    let sellerProfile = await SellerProfile.findOne({ seller_id: user._id });
+    if (!sellerProfile) {
+      sellerProfile = await SellerProfile.create({ seller_id: user._id });
+    }
+    sellerProfile.shop_name = normalizedShopName;
+    if (normalizedAddressLine) {
+      sellerProfile.address_line = normalizedAddressLine;
+    }
+    await sellerProfile.save();
     user.role = "seller";
     await user.save();
 
@@ -465,7 +543,16 @@ exports.getProfile = async (req, res) => {
     const user = await User.findById(userId).select("-password_hash");
     if (!user) return res.status(404).json({ message: "Người dùng không tồn tại" });
 
-    res.status(200).json({ user });
+    const [customerProfile, sellerProfile] = await Promise.all([
+      CustomerProfile.findOne({ user_id: userId }),
+      SellerProfile.findOne({ seller_id: userId }),
+    ]);
+
+    res.status(200).json({
+      user: user.toObject(),
+      customerProfile: customerProfile ? customerProfile.toObject() : null,
+      sellerProfile: sellerProfile ? sellerProfile.toObject() : null,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -559,15 +646,20 @@ exports.updateProfile = async (req, res) => {
 
     const userId = req.userId;
     const { full_name, phone, avatar_url, address_line } = req.body || {};
+    const avatarFromFile = req.file ? await uploadBufferToCloudinary(req.file, "avatars") : null;
 
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "Người dùng không tồn tại" });
     }
 
-    if (typeof full_name !== "undefined") user.full_name = full_name;
+    if (typeof full_name !== "undefined" && normalizeText(full_name)) user.full_name = normalizeText(full_name);
     if (typeof phone !== "undefined") user.phone = phone;
-    if (typeof avatar_url !== "undefined") user.avatar_url = avatar_url;
+    if (avatarFromFile) {
+      user.avatar_url = avatarFromFile;
+    } else if (typeof avatar_url !== "undefined") {
+      user.avatar_url = avatar_url;
+    }
     await user.save();
 
     if (typeof address_line !== "undefined") {
@@ -580,14 +672,12 @@ exports.updateProfile = async (req, res) => {
     }
 
     const updatedUser = await User.findById(userId).select("-password_hash");
-    let customerProfile = await CustomerProfile.findOne({ user_id: userId });
+    const customerProfile = await CustomerProfile.findOne({ user_id: userId });
 
     return res.status(200).json({
       message: "Cập nhật profile thành công",
-      user: {
-        ...updatedUser.toObject(),
-        customerProfile: customerProfile ? customerProfile.toObject() : null,
-      },
+      user: updatedUser.toObject(),
+      customerProfile: customerProfile ? customerProfile.toObject() : null,
     });
   } catch (error) {
     console.error("Update profile error:", error);
@@ -602,16 +692,24 @@ exports.updateSellerProfile = async (req, res) => {
     }
 
     const userId = req.userId;
-    const { full_name, phone, avatar_url, shop_name, address_line } = req.body || {};
+    const { full_name, phone, avatar_url, shop_name, address_line, shop_email, shop_phone } = req.body || {};
+    const avatarFromFile = getFirstFile(req.files, "avatar");
+    const logoFromFile = getFirstFile(req.files, "logo");
+    const avatarUrlFromFile = avatarFromFile ? await uploadBufferToCloudinary(avatarFromFile, "avatars") : null;
+    const logoUrlFromFile = logoFromFile ? await uploadBufferToCloudinary(logoFromFile, "shop-logos") : null;
 
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "Seller không tồn tại" });
     }
 
-    if (typeof full_name !== "undefined") user.full_name = full_name;
+    if (typeof full_name !== "undefined" && normalizeText(full_name)) user.full_name = normalizeText(full_name);
     if (typeof phone !== "undefined") user.phone = phone;
-    if (typeof avatar_url !== "undefined") user.avatar_url = avatar_url;
+    if (avatarUrlFromFile) {
+      user.avatar_url = avatarUrlFromFile;
+    } else if (typeof avatar_url !== "undefined") {
+      user.avatar_url = avatar_url;
+    }
     await user.save();
 
     let sellerProfile = await SellerProfile.findOne({ seller_id: userId });
@@ -619,18 +717,21 @@ exports.updateSellerProfile = async (req, res) => {
       sellerProfile = await SellerProfile.create({ seller_id: userId });
     }
 
-    if (typeof shop_name !== "undefined") sellerProfile.shop_name = shop_name;
+    if (typeof shop_name !== "undefined" && normalizeText(shop_name)) sellerProfile.shop_name = normalizeText(shop_name);
     if (typeof address_line !== "undefined") sellerProfile.address_line = address_line;
+    if (typeof shop_email !== "undefined") sellerProfile.shop_email = shop_email;
+    if (typeof shop_phone !== "undefined") sellerProfile.shop_phone = shop_phone;
+    if (logoUrlFromFile) {
+      sellerProfile.logo_url = logoUrlFromFile;
+    }
     await sellerProfile.save();
 
     const updatedUser = await User.findById(userId).select("-password_hash");
 
     return res.status(200).json({
       message: "Cập nhật profile seller thành công",
-      user: {
-        ...updatedUser.toObject(),
-        sellerProfile: sellerProfile.toObject(),
-      },
+      user: updatedUser.toObject(),
+      sellerProfile: sellerProfile.toObject(),
     });
   } catch (error) {
     console.error("Update seller profile error:", error);
@@ -722,6 +823,10 @@ exports.updateShopSettings = async (req, res) => {
       return_policy,
       status,
     } = req.body || {};
+    const logoFromFile = getFirstFile(req.files, "logo");
+    const bannerFromFile = getFirstFile(req.files, "banner");
+    const logoUrlFromFile = logoFromFile ? await uploadBufferToCloudinary(logoFromFile, "shop-logos") : null;
+    const bannerUrlFromFile = bannerFromFile ? await uploadBufferToCloudinary(bannerFromFile, "shop-banners") : null;
 
     if (!shop_name || !shop_name.trim()) {
       return res.status(400).json({ message: "Tên cửa hàng là bắt buộc" });
@@ -746,8 +851,16 @@ exports.updateShopSettings = async (req, res) => {
     if (typeof address_line !== "undefined") sellerProfile.address_line = address_line;
     if (typeof shop_email !== "undefined") sellerProfile.shop_email = shop_email;
     if (typeof shop_phone !== "undefined") sellerProfile.shop_phone = shop_phone;
-    if (typeof logo_url !== "undefined") sellerProfile.logo_url = logo_url;
-    if (typeof banner_url !== "undefined") sellerProfile.banner_url = banner_url;
+    if (logoUrlFromFile) {
+      sellerProfile.logo_url = logoUrlFromFile;
+    } else if (typeof logo_url !== "undefined") {
+      sellerProfile.logo_url = logo_url;
+    }
+    if (bannerUrlFromFile) {
+      sellerProfile.banner_url = bannerUrlFromFile;
+    } else if (typeof banner_url !== "undefined") {
+      sellerProfile.banner_url = banner_url;
+    }
     if (typeof operating_hours !== "undefined") sellerProfile.operating_hours = operating_hours;
     if (typeof shipping_policy !== "undefined") sellerProfile.shipping_policy = shipping_policy;
     if (typeof return_policy !== "undefined") sellerProfile.return_policy = return_policy;
@@ -768,7 +881,10 @@ exports.updateShopSettings = async (req, res) => {
 exports.getSellerPublicProfile = async (req, res) => {
   try {
     const { id } = req.params;
-    const sellerProfile = await SellerProfile.findOne({ seller_id: id });
+    const [sellerProfile, user] = await Promise.all([
+      SellerProfile.findOne({ seller_id: id }),
+      User.findById(id).select("full_name avatar_url role"),
+    ]);
 
     if (!sellerProfile) {
       return res.status(200).json({
@@ -776,7 +892,16 @@ exports.getSellerPublicProfile = async (req, res) => {
       });
     }
 
-    return res.status(200).json({ data: sellerProfile.toObject() });
+    const data = sellerProfile.toObject();
+    return res.status(200).json({
+      data: {
+        ...data,
+        shop_name: data.shop_name || user?.full_name || "Nhà bán",
+        logo_url: data.logo_url || user?.avatar_url || null,
+        owner_name: user?.full_name || "",
+        owner_avatar_url: user?.avatar_url || null,
+      },
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

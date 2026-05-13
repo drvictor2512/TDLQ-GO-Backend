@@ -1,8 +1,11 @@
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
 
 const authController = require("../controllers/auth.controller");
 const authMiddleware = require("../middlewares/auth.middleware");
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Backward-compatible auth routes
 router.post("/register", authController.register);
@@ -22,6 +25,7 @@ router.put(
   "/user/profile",
   authMiddleware,
   authMiddleware.requireRoles("customer"),
+  upload.single("avatar"),
   authController.updateProfile,
 );
 
@@ -44,6 +48,10 @@ router.put(
   "/seller/profile",
   authMiddleware,
   authMiddleware.requireRoles("seller"),
+  upload.fields([
+    { name: "avatar", maxCount: 1 },
+    { name: "logo", maxCount: 1 },
+  ]),
   authController.updateSellerProfile,
 );
 
@@ -58,6 +66,10 @@ router.put(
   "/seller/settings",
   authMiddleware,
   authMiddleware.requireRoles("seller"),
+  upload.fields([
+    { name: "logo", maxCount: 1 },
+    { name: "banner", maxCount: 1 },
+  ]),
   authController.updateShopSettings,
 );
 
