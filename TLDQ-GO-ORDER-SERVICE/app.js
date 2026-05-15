@@ -2,6 +2,7 @@ const express = require("express");
 const app = express();
 const cors = require("cors");
 require("dotenv").config();
+const mongoose = require("mongoose");
 const connectDB = require("./config/db");
 const orderRoutes = require("./routes/order.routes");
 const { connectRabbitMQ } = require("./config/rabbitmq");
@@ -19,8 +20,20 @@ connectRabbitMQ().catch((err) => {
 
 app.use("/orders", orderRoutes);
 
+app.get("/health", (req, res) => {
+  const dbOk = mongoose.connection.readyState === 1;
+  const status = dbOk ? "ok" : "degraded";
+  res.status(dbOk ? 200 : 503).json({
+    status,
+    service: "order-service",
+    uptime: Math.floor(process.uptime()),
+    db: dbOk ? "connected" : "disconnected",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get("/", (req, res) => {
-  res.send("order service running");
+  res.json({ status: "ok", service: "order-service" });
 });
 
 const PORT = process.env.ORDER_SERVICE_PORT || 3003;

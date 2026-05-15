@@ -1,9 +1,28 @@
 const { VNPay, ignoreLogger, ProductCode, VnpLocale } = require("vnpay");
 const Order = require("../models/order.model");
+const Notification = require("../models/notification.model");
 const { publishEvent } = require("../config/rabbitmq");
 
 const USER_SERVICE_URL = process.env.USER_SERVICE_URL || "http://user:3001";
 const PRODUCT_SERVICE_URL = process.env.PRODUCT_SERVICE_URL || "http://product:3002";
+const GATEWAY_URL = process.env.GATEWAY_URL || "http://api-gateway:3000";
+
+async function saveAndNotify(targetUserId, type, title, message, orderId) {
+  try {
+    await Notification.create({ userId: targetUserId, type, title, message, orderId });
+  } catch (err) {
+    console.error("[Notification] Save failed:", err.message);
+  }
+  try {
+    await fetch(`${GATEWAY_URL}/internal/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUserId, type, title, message, orderId }),
+    });
+  } catch (err) {
+    console.error("[Notify] Gateway emit failed:", err.message);
+  }
+}
 
 const VNPAY_RETURN_URL = process.env.VNPAY_RETURN_URL || "http://localhost:5173/thanh-toan/ket-qua";
 
@@ -106,7 +125,6 @@ exports.createOrder = async (req, res) => {
     });
 
     // ── BƯỚC 4: Publish event "order.created" vào RabbitMQ (async) ─────────
-    // Product Service sẽ tự lắng nghe và trừ tồn kho ở background
     publishEvent("order.created", {
       order_id: newOrder._id.toString(),
       items: validatedItems.map((i) => ({
@@ -115,6 +133,23 @@ exports.createOrder = async (req, res) => {
       })),
       timestamp: new Date().toISOString(),
     });
+
+    // ── BƯỚC 5: Gửi thông báo real-time ─────────────────────────────────────
+    const orderShort = newOrder._id.toString().slice(-6).toUpperCase();
+    saveAndNotify(
+      customer_id,
+      "order_created",
+      "Đặt hàng thành công",
+      `Đơn hàng #${orderShort} đã được tạo, đang chờ xác nhận.`,
+      newOrder._id.toString()
+    );
+    saveAndNotify(
+      detected_seller_id,
+      "new_order",
+      "Đơn hàng mới",
+      `Bạn có đơn hàng mới #${orderShort} cần xác nhận.`,
+      newOrder._id.toString()
+    );
 
     return res.status(201).json({
       message: "Order created successfully",
@@ -207,6 +242,32 @@ exports.updateOrderStatus = async (req, res) => {
         })),
         timestamp: new Date().toISOString(),
       });
+    }
+
+    // ── Thông báo khách hàng khi trạng thái thay đổi ────────────────────────
+    const statusMessages = {
+      confirmed:  "Đơn hàng của bạn đã được xác nhận.",
+      preparing:  "Người bán đang chuẩn bị hàng.",
+      delivering: "Đơn hàng đang trên đường giao đến bạn.",
+      completed:  "Đơn hàng đã giao thành công. Cảm ơn bạn!",
+      cancelled:  "Đơn hàng của bạn đã bị hủy.",
+    };
+    const statusTitles = {
+      confirmed:  "Đơn hàng đã xác nhận",
+      preparing:  "Đang chuẩn bị hàng",
+      delivering: "Đang giao hàng",
+      completed:  "Giao hàng thành công",
+      cancelled:  "Đơn hàng bị hủy",
+    };
+    if (statusMessages[status]) {
+      const orderShort = order._id.toString().slice(-6).toUpperCase();
+      saveAndNotify(
+        order.customer_id,
+        status,
+        statusTitles[status],
+        `${statusMessages[status]} (Đơn #${orderShort})`,
+        order._id.toString()
+      );
     }
 
     return res.status(200).json({

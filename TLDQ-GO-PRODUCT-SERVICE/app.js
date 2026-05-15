@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
 
+const mongoose = require("mongoose");
 const connectDB = require("./config/db");
 const productRoutes = require("./routes/product.routes");
 const categoryRoutes = require("./routes/category.routes");
@@ -31,8 +32,19 @@ app.use("/", productRoutes);
 app.use("/", voucherRoutes);
 app.use("/", reviewRoutes);
 
-app.get("/", (req, res) => {
-  res.send("Product service running 🚀");
+app.get("/health", (_req, res) => {
+  const dbOk = mongoose.connection.readyState === 1;
+  res.status(dbOk ? 200 : 503).json({
+    status: dbOk ? "ok" : "degraded",
+    service: "product-service",
+    uptime: Math.floor(process.uptime()),
+    db: dbOk ? "connected" : "disconnected",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/", (_req, res) => {
+  res.json({ status: "ok", service: "product-service" });
 });
 
 const PORT = process.env.PRODUCT_SERVICE_PORT || 3002;

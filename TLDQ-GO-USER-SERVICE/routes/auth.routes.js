@@ -73,6 +73,10 @@ router.put(
   authController.updateShopSettings,
 );
 
+// Refresh token & Logout
+router.post("/refresh-token", authController.refreshToken);
+router.post("/logout", authController.logout);
+
 // Forgot & Reset Password
 router.post("/forgot-password", authController.forgotPassword);
 router.post("/reset-password", authController.resetPassword);

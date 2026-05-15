@@ -441,6 +441,117 @@ exports.updateStock = async (req, res) => {
   }
 };
 
+// SEARCH PRODUCTS — GET /products/search
+exports.searchProducts = async (req, res) => {
+  try {
+    const { q, category, minPrice, maxPrice, sort, page = 1, limit = 12 } = req.query;
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
+
+    const cacheKey = `search:${q || ""}:${category || ""}:${minPrice || ""}:${maxPrice || ""}:${sort || ""}:${pageNum}:${limitNum}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached) return res.status(200).json(cached);
+
+    const match = { status: "approved" };
+
+    if (q && q.trim()) {
+      match.name = { $regex: q.trim(), $options: "i" };
+    }
+
+    if (minPrice || maxPrice) {
+      match.price = {};
+      if (minPrice) match.price.$gte = Number(minPrice);
+      if (maxPrice) match.price.$lte = Number(maxPrice);
+    }
+
+    if (category && category.trim()) {
+      const cat = await Category.findOne({ name: { $regex: category.trim(), $options: "i" } });
+      if (cat) {
+        match.category_id = cat._id;
+      } else {
+        const payload = {
+          message: "Không tìm thấy danh mục",
+          data: [],
+          pagination: { page: pageNum, totalPages: 0, totalItems: 0, limit: limitNum },
+        };
+        return res.status(200).json(payload);
+      }
+    }
+
+    const sortMap = {
+      price_asc: { price: 1 },
+      price_desc: { price: -1 },
+      best_seller: { sold: -1 },
+      rating: { rating_average: -1 },
+      newest: { createdAt: -1 },
+    };
+    const sortObj = sortMap[sort] || { createdAt: -1 };
+
+    const skip = (pageNum - 1) * limitNum;
+    const total = await Product.countDocuments(match);
+    const products = await Product.find(match)
+      .populate("category_id")
+      .sort(sortObj)
+      .skip(skip)
+      .limit(limitNum);
+
+    const productsWithVoucher = await getVoucherDisplayData(products);
+
+    const payload = {
+      message: "Tìm kiếm sản phẩm thành công",
+      data: productsWithVoucher,
+      pagination: {
+        page: pageNum,
+        totalPages: Math.ceil(total / limitNum),
+        totalItems: total,
+        limit: limitNum,
+      },
+    };
+
+    await cacheSet(cacheKey, payload, 120);
+    return res.status(200).json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+// GET RELATED PRODUCTS — GET /products/:id/related
+exports.getRelatedProducts = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const cacheKey = `related:${id}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached) return res.status(200).json(cached);
+
+    const product = await Product.findById(id).select("category_id");
+    if (!product) {
+      return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
+    }
+
+    const related = await Product.find({
+      category_id: product.category_id,
+      _id: { $ne: id },
+      status: "approved",
+    })
+      .populate("category_id")
+      .sort({ sold: -1 })
+      .limit(8);
+
+    const relatedWithVoucher = await getVoucherDisplayData(related);
+
+    const payload = {
+      message: "Lấy sản phẩm liên quan thành công",
+      data: relatedWithVoucher,
+    };
+
+    await cacheSet(cacheKey, payload, 300);
+    return res.status(200).json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
 // GET BY SELLER
 exports.getProductsBySeller = async (req, res) => {
   try {

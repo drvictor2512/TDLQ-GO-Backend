@@ -27,4 +27,4 @@ async function deleteCart(userId) {
   await client.del(cartKey(userId));
 }
 
-module.exports = { getCart, saveCart, deleteCart };
+module.exports = { client, getCart, saveCart, deleteCart };

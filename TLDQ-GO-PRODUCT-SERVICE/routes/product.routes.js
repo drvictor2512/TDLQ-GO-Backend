@@ -15,6 +15,8 @@ const {
   getProductsBySeller,
   getProductsByCategoryName,
   updateStock,
+  searchProducts,
+  getRelatedProducts,
 } = require("../controllers/product.controller");
 
 // GET
@@ -29,9 +31,11 @@ router.delete("/products/:id", deleteProduct);
 
 router.post("/products", upload.array("images", 5), createProduct);
 router.get("/products/page", getProductsWithPage);
+router.get("/products/search", searchProducts);
 router.get("/products/seller/:seller_id", getProductsBySeller);
 router.get("/products/category/name/:name", getProductsByCategoryName);
 
 router.patch("/products/:id/stock", updateStock);
+router.get("/products/:id/related", getRelatedProducts);
 router.get("/products/:id", getProductById);
 module.exports = router;

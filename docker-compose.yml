@@ -41,10 +41,20 @@ services:
     env_file:
       - ./TLDQ-GO-API-GATEWAY/.env
     depends_on:
-      - user
-      - product
-      - order
-      - cart
+      user:
+        condition: service_healthy
+      product:
+        condition: service_healthy
+      order:
+        condition: service_healthy
+      cart:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: always
     networks:
       - micro-network
@@ -57,6 +67,12 @@ services:
       - "3001:3001"
     env_file:
       - ./TLDQ-GO-USER-SERVICE/.env
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: always
     networks:
       - micro-network
@@ -76,6 +92,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3002/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: always
     networks:
       - micro-network
@@ -93,6 +115,12 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3004/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: always
     networks:
       - micro-network
@@ -108,11 +136,18 @@ services:
     environment:
       - USER_SERVICE_URL=http://user:3001
       - PRODUCT_SERVICE_URL=http://product:3002
+      - GATEWAY_URL=http://api-gateway:3000
       - VNPAY_PAYMENT_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
       - VNPAY_RETURN_URL=http://localhost:5173/thanh-toan/ket-qua
     depends_on:
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', r => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: always
     networks:
       - micro-network
