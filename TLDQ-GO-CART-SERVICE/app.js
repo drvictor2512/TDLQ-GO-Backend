@@ -30,4 +30,18 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.CART_SERVICE_PORT || 3004;
-app.listen(PORT, () => console.log(`[CartService] running on port ${PORT}`));
+
+const server = app.listen(PORT, () => console.log(`[CartService] running on port ${PORT}`));
+
+const shutdown = (signal) => {
+  console.log(`[${signal}] Graceful shutdown cart-service...`);
+  server.close(() => {
+    redisClient.quit().finally(() => {
+      console.log("[cart-service] Redis closed");
+      process.exit(0);
+    });
+  });
+  setTimeout(() => process.exit(1), 10_000);
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

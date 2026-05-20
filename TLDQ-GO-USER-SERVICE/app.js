@@ -36,6 +36,19 @@ app.get("/", (_req, res) => {
 
 const PORT = process.env.USER_SERVICE_PORT || 3001;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+const shutdown = (signal) => {
+  console.log(`[${signal}] Graceful shutdown user-service...`);
+  server.close(() => {
+    mongoose.connection.close(false, () => {
+      console.log("[user-service] DB closed");
+      process.exit(0);
+    });
+  });
+  setTimeout(() => process.exit(1), 10_000);
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

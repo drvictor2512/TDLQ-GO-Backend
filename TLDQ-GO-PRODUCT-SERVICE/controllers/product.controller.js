@@ -3,6 +3,7 @@ const cloudinary = require("../config/cloudinary");
 const Product = require("../models/product.model");
 const Voucher = require("../models/voucher.model");
 const Category = require("../models/category.model");
+const FlashSale = require("../models/flashSale.model");
 const {
   cacheGet,
   cacheSet,
@@ -444,11 +445,11 @@ exports.updateStock = async (req, res) => {
 // SEARCH PRODUCTS — GET /products/search
 exports.searchProducts = async (req, res) => {
   try {
-    const { q, category, minPrice, maxPrice, sort, page = 1, limit = 12 } = req.query;
+    const { q, category, minPrice, maxPrice, minRating, sort, page = 1, limit = 12 } = req.query;
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
 
-    const cacheKey = `search:${q || ""}:${category || ""}:${minPrice || ""}:${maxPrice || ""}:${sort || ""}:${pageNum}:${limitNum}`;
+    const cacheKey = `search:${q || ""}:${category || ""}:${minPrice || ""}:${maxPrice || ""}:${minRating || ""}:${sort || ""}:${pageNum}:${limitNum}`;
     const cached = await cacheGet(cacheKey);
     if (cached) return res.status(200).json(cached);
 
@@ -462,6 +463,10 @@ exports.searchProducts = async (req, res) => {
       match.price = {};
       if (minPrice) match.price.$gte = Number(minPrice);
       if (maxPrice) match.price.$lte = Number(maxPrice);
+    }
+
+    if (minRating && Number(minRating) > 0) {
+      match.rating_average = { $gte: Number(minRating) };
     }
 
     if (category && category.trim()) {
@@ -590,5 +595,164 @@ exports.getProductsBySeller = async (req, res) => {
       message: "Lỗi server",
       error: error.message,
     });
+  }
+};
+
+// FLASH SALE — POST /products/flash-sales
+exports.createFlashSale = async (req, res) => {
+  try {
+    const { product_id, seller_id, sale_price, start_time, end_time, quantity_limit } = req.body;
+    if (!product_id || !seller_id || !sale_price || !start_time || !end_time) {
+      return res.status(400).json({ message: "Thiếu thông tin bắt buộc" });
+    }
+
+    const product = await Product.findById(product_id);
+    if (!product) return res.status(404).json({ message: "Không tìm thấy sản phẩm" });
+    if (String(product.seller_id) !== String(seller_id)) {
+      return res.status(403).json({ message: "Bạn không có quyền tạo flash sale cho sản phẩm này" });
+    }
+
+    const start = new Date(start_time);
+    const end = new Date(end_time);
+    const now = new Date();
+
+    if (end <= start) return res.status(400).json({ message: "end_time phải sau start_time" });
+    if (Number(sale_price) >= product.price) {
+      return res.status(400).json({ message: "Giá sale phải thấp hơn giá gốc" });
+    }
+
+    const discount_percent = Math.round(((product.price - sale_price) / product.price) * 100);
+    const status = now >= start ? "active" : "upcoming";
+
+    const flashSale = await FlashSale.create({
+      product_id,
+      seller_id,
+      original_price: product.price,
+      sale_price: Number(sale_price),
+      discount_percent,
+      start_time: start,
+      end_time: end,
+      quantity_limit: quantity_limit || 0,
+      status,
+    });
+
+    await cacheDel("flash-sales:active");
+    return res.status(201).json({ message: "Tạo flash sale thành công", data: flashSale });
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+// FLASH SALE — GET /products/flash-sales/active
+exports.getActiveFlashSales = async (req, res) => {
+  try {
+    const cacheKey = "flash-sales:active";
+    const cached = await cacheGet(cacheKey);
+    if (cached) return res.status(200).json(cached);
+
+    const now = new Date();
+    const flashSales = await FlashSale.find({
+      end_time: { $gte: now },
+      start_time: { $lte: now },
+    })
+      .populate("product_id")
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    const payload = { message: "Lấy flash sale thành công", data: flashSales };
+    await cacheSet(cacheKey, payload, 60);
+    return res.status(200).json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+// FLASH SALE — GET /products/:id/flash-sale
+exports.getFlashSaleByProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const now = new Date();
+    const flashSale = await FlashSale.findOne({
+      product_id: id,
+      start_time: { $lte: now },
+      end_time: { $gte: now },
+    });
+    return res.status(200).json({ data: flashSale || null });
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+// FLASH SALE — GET /products/flash-sales/seller/:sellerId
+exports.getFlashSalesBySeller = async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const flashSales = await FlashSale.find({ seller_id: sellerId })
+      .populate("product_id", "name images price")
+      .sort({ createdAt: -1 });
+    return res.status(200).json({ data: flashSales });
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+// FLASH SALE — PATCH /products/flash-sales/:id
+exports.updateFlashSale = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { seller_id, sale_price, start_time, end_time, quantity_limit } = req.body;
+
+    const flashSale = await FlashSale.findById(id);
+    if (!flashSale) return res.status(404).json({ message: "Không tìm thấy flash sale" });
+    if (seller_id && String(flashSale.seller_id) !== String(seller_id)) {
+      return res.status(403).json({ message: "Bạn không có quyền sửa flash sale này" });
+    }
+
+    if (sale_price !== undefined) {
+      if (Number(sale_price) >= flashSale.original_price) {
+        return res.status(400).json({ message: "Giá sale phải thấp hơn giá gốc" });
+      }
+      flashSale.sale_price = Number(sale_price);
+      flashSale.discount_percent = Math.round(((flashSale.original_price - sale_price) / flashSale.original_price) * 100);
+    }
+    if (start_time) flashSale.start_time = new Date(start_time);
+    if (end_time) {
+      if (new Date(end_time) <= (start_time ? new Date(start_time) : flashSale.start_time)) {
+        return res.status(400).json({ message: "end_time phải sau start_time" });
+      }
+      flashSale.end_time = new Date(end_time);
+    }
+    if (quantity_limit !== undefined) flashSale.quantity_limit = Number(quantity_limit);
+
+    const now = new Date();
+    if (now < flashSale.start_time) flashSale.status = "upcoming";
+    else if (now <= flashSale.end_time) flashSale.status = "active";
+    else flashSale.status = "ended";
+
+    await flashSale.save();
+    await cacheDel("flash-sales:active");
+    return res.status(200).json({ message: "Cập nhật flash sale thành công", data: flashSale });
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
+  }
+};
+
+// FLASH SALE — DELETE /products/flash-sales/:id
+exports.deleteFlashSale = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { seller_id } = req.body;
+
+    const flashSale = await FlashSale.findById(id);
+    if (!flashSale) return res.status(404).json({ message: "Không tìm thấy flash sale" });
+    if (seller_id && String(flashSale.seller_id) !== String(seller_id)) {
+      return res.status(403).json({ message: "Bạn không có quyền xóa flash sale này" });
+    }
+
+    await FlashSale.deleteOne({ _id: id });
+    await cacheDel("flash-sales:active");
+    return res.status(200).json({ message: "Xóa flash sale thành công" });
+  } catch (error) {
+    return res.status(500).json({ message: "Lỗi server", error: error.message });
   }
 };

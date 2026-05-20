@@ -229,3 +229,14 @@ const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`API Gateway running on port ${PORT}`);
 });
+
+const shutdown = (signal) => {
+  console.log(`[${signal}] Graceful shutdown api-gateway...`);
+  httpServer.close(() => {
+    console.log("[api-gateway] HTTP server closed");
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 10_000);
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

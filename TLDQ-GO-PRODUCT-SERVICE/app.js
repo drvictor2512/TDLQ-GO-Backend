@@ -49,6 +49,19 @@ app.get("/", (_req, res) => {
 
 const PORT = process.env.PRODUCT_SERVICE_PORT || 3002;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
+
+const shutdown = (signal) => {
+  console.log(`[${signal}] Graceful shutdown product-service...`);
+  server.close(() => {
+    mongoose.connection.close(false, () => {
+      console.log("[product-service] DB closed");
+      process.exit(0);
+    });
+  });
+  setTimeout(() => process.exit(1), 10_000);
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

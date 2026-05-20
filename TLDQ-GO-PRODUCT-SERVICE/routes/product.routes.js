@@ -17,6 +17,12 @@ const {
   updateStock,
   searchProducts,
   getRelatedProducts,
+  createFlashSale,
+  getActiveFlashSales,
+  getFlashSaleByProduct,
+  getFlashSalesBySeller,
+  updateFlashSale,
+  deleteFlashSale,
 } = require("../controllers/product.controller");
 
 // GET
@@ -37,5 +43,14 @@ router.get("/products/category/name/:name", getProductsByCategoryName);
 
 router.patch("/products/:id/stock", updateStock);
 router.get("/products/:id/related", getRelatedProducts);
+router.get("/products/:id/flash-sale", getFlashSaleByProduct);
+
+// Flash sale routes — phải đặt TRƯỚC /:id để tránh conflict
+router.post("/products/flash-sales", createFlashSale);
+router.get("/products/flash-sales/active", getActiveFlashSales);
+router.get("/products/flash-sales/seller/:sellerId", getFlashSalesBySeller);
+router.patch("/products/flash-sales/:id", updateFlashSale);
+router.delete("/products/flash-sales/:id", deleteFlashSale);
+
 router.get("/products/:id", getProductById);
 module.exports = router;
