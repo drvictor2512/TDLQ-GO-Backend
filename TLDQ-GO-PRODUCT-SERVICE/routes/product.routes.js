@@ -25,8 +25,14 @@ const {
   deleteFlashSale,
 } = require("../controllers/product.controller");
 
+const { aiChat, aiHistory } = require("../controllers/ai.controller");
+
 // GET
 router.get("/products", getAllProducts);
+
+// AI chatbox
+router.post("/products/ai/chat", aiChat);
+router.get("/products/ai/history", aiHistory);
 
 // PUT
 router.put("/products/:id", upload.single("image"), updateProduct);
