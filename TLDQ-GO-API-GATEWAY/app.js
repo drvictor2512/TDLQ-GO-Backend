@@ -11,11 +11,17 @@ const http = require("http");
 const https = require("https");
 const { Server } = require("socket.io");
 
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./swagger");
+
 const app = express();
 const USER_SERVICE_URL = process.env.USER_SERVICE;
 const PRODUCT_SERVICE_URL = process.env.PRODUCT_SERVICE;
 const ORDER_SERVICE_URL = process.env.ORDER_SERVICE;
 const CART_SERVICE_URL = process.env.CART_SERVICE;
+
+// ── API Docs (Swagger UI) — before rate limiter so it's never throttled ──────
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ── Security headers ──────────────────────────────────────────────────────────
 app.use(helmet());
