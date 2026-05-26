@@ -18,13 +18,13 @@ router.post("/user/login", authController.loginUser);
 router.post(
   "/user/change-password",
   authMiddleware,
-  authMiddleware.requireRoles("customer"),
+  authMiddleware.requireRoles("customer", "seller"),
   authController.changePasswordUser,
 );
 router.put(
   "/user/profile",
   authMiddleware,
-  authMiddleware.requireRoles("customer"),
+  authMiddleware.requireRoles("customer", "seller"),
   upload.single("avatar"),
   authController.updateProfile,
 );

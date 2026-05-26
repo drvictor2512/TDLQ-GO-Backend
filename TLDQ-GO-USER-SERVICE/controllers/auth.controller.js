@@ -8,6 +8,7 @@ const cloudinary = require("../config/cloudinary");
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const USER_ROLES = ["customer", "seller", "admin"];
+const CUSTOMER_ACCESS_ROLES = ["customer", "seller"];
 
 function omitPassword(userDoc) {
   const user = userDoc.toObject ? userDoc.toObject() : userDoc;
@@ -208,7 +209,7 @@ exports.registerUser = async (req, res) => {
 
 exports.loginUser = async (req, res) => {
   try {
-    return await loginByRole(req, res, ["customer"]);
+    return await loginByRole(req, res, CUSTOMER_ACCESS_ROLES);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -216,7 +217,7 @@ exports.loginUser = async (req, res) => {
 
 exports.changePasswordUser = async (req, res) => {
   try {
-    if (req.userRole !== "customer") {
+    if (!CUSTOMER_ACCESS_ROLES.includes(req.userRole)) {
       return res.status(403).json({ message: "Forbidden" });
     }
 
@@ -231,7 +232,7 @@ exports.changePasswordUser = async (req, res) => {
     }
 
     const user = await User.findById(req.userId);
-    if (!user || user.role !== "customer") {
+    if (!user || !CUSTOMER_ACCESS_ROLES.includes(user.role)) {
       return res.status(404).json({ message: "Người dùng không tồn tại" });
     }
 
@@ -640,8 +641,8 @@ exports.resetPassword = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
   try {
-    if (req.userRole !== "customer") {
-      return res.status(403).json({ message: "Chỉ tài khoản customer mới có thể cập nhật profile bằng endpoint này" });
+    if (!CUSTOMER_ACCESS_ROLES.includes(req.userRole)) {
+      return res.status(403).json({ message: "Forbidden" });
     }
 
     const userId = req.userId;
@@ -649,7 +650,7 @@ exports.updateProfile = async (req, res) => {
     const avatarFromFile = req.file ? await uploadBufferToCloudinary(req.file, "avatars") : null;
 
     const user = await User.findById(userId);
-    if (!user) {
+    if (!user || !CUSTOMER_ACCESS_ROLES.includes(user.role)) {
       return res.status(404).json({ message: "Người dùng không tồn tại" });
     }
 
@@ -662,8 +663,11 @@ exports.updateProfile = async (req, res) => {
     }
     await user.save();
 
-    if (typeof address_line !== "undefined") {
-      let customerProfile = await CustomerProfile.findOne({ user_id: userId });
+    let customerProfile = null;
+    let sellerProfile = null;
+
+    if (typeof address_line !== "undefined" && user.role === "customer") {
+      customerProfile = await CustomerProfile.findOne({ user_id: userId });
       if (!customerProfile) {
         customerProfile = await CustomerProfile.create({ user_id: userId });
       }
@@ -671,13 +675,28 @@ exports.updateProfile = async (req, res) => {
       await customerProfile.save();
     }
 
+    if (typeof address_line !== "undefined" && user.role === "seller") {
+      sellerProfile = await SellerProfile.findOne({ seller_id: userId });
+      if (!sellerProfile) {
+        sellerProfile = await SellerProfile.create({ seller_id: userId });
+      }
+      sellerProfile.address_line = address_line;
+      await sellerProfile.save();
+    }
+
     const updatedUser = await User.findById(userId).select("-password_hash");
-    const customerProfile = await CustomerProfile.findOne({ user_id: userId });
+    if (user.role === "customer") {
+      customerProfile = await CustomerProfile.findOne({ user_id: userId });
+    }
+    if (user.role === "seller") {
+      sellerProfile = await SellerProfile.findOne({ seller_id: userId });
+    }
 
     return res.status(200).json({
       message: "Cập nhật profile thành công",
       user: updatedUser.toObject(),
       customerProfile: customerProfile ? customerProfile.toObject() : null,
+      sellerProfile: sellerProfile ? sellerProfile.toObject() : null,
     });
   } catch (error) {
     console.error("Update profile error:", error);
