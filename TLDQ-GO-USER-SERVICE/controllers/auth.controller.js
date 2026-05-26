@@ -1,10 +1,8 @@
 const User = require("../models/user.model");
 const SellerProfile = require("../models/sellerProfile.model");
 const CustomerProfile = require("../models/customerProfile.model");
-const RefreshToken = require("../models/refreshToken.model");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const crypto = require("crypto");
 const emailService = require("../services/email.service");
 const cloudinary = require("../config/cloudinary");
 
@@ -26,15 +24,8 @@ function createAccessToken(user) {
   return jwt.sign(
     { userId: user._id, role: user.role },
     process.env.JWT_SECRET || "secretkey",
-    { expiresIn: "15m" }
+    { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
   );
-}
-
-async function createRefreshToken(userId) {
-  const token = crypto.randomBytes(64).toString("hex");
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 ngày
-  await RefreshToken.create({ token, userId, expiresAt });
-  return token;
 }
 
 function validatePassword(password) {
@@ -159,8 +150,7 @@ async function registerByRole(req, res, role) {
   });
 
   const token = createAccessToken(newUser);
-  const refreshToken = await createRefreshToken(newUser._id);
-  return res.status(201).json({ message: "Đăng ký thành công", token, refreshToken, user: omitPassword(newUser) });
+  return res.status(201).json({ message: "Đăng ký thành công", token, user: omitPassword(newUser) });
 }
 
 async function loginByRole(req, res, acceptedRoles) {
@@ -187,8 +177,7 @@ async function loginByRole(req, res, acceptedRoles) {
   }
 
   const token = createAccessToken(user);
-  const refreshToken = await createRefreshToken(user._id);
-  return res.status(200).json({ message: "Đăng nhập thành công", token, refreshToken, user: omitPassword(user) });
+  return res.status(200).json({ message: "Đăng nhập thành công", token, user: omitPassword(user) });
 }
 
 exports.register = async (req, res) => {
@@ -885,43 +874,6 @@ exports.updateShopSettings = async (req, res) => {
     });
   } catch (error) {
     console.error("Update shop settings error:", error);
-    res.status(500).json({ message: error.message });
-  }
-};
-
-exports.refreshToken = async (req, res) => {
-  try {
-    const { refreshToken } = req.body || {};
-    if (!refreshToken) {
-      return res.status(400).json({ message: "refreshToken là bắt buộc" });
-    }
-
-    const record = await RefreshToken.findOne({ token: refreshToken });
-    if (!record || record.expiresAt < new Date()) {
-      if (record) await RefreshToken.deleteOne({ _id: record._id });
-      return res.status(401).json({ message: "Refresh token không hợp lệ hoặc đã hết hạn" });
-    }
-
-    const user = await User.findById(record.userId);
-    if (!user) {
-      return res.status(401).json({ message: "Người dùng không tồn tại" });
-    }
-
-    const token = createAccessToken(user);
-    return res.status(200).json({ token });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-exports.logout = async (req, res) => {
-  try {
-    const { refreshToken } = req.body || {};
-    if (refreshToken) {
-      await RefreshToken.deleteOne({ token: refreshToken });
-    }
-    return res.status(200).json({ message: "Đăng xuất thành công" });
-  } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
