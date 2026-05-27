@@ -18,6 +18,10 @@ app.use(morgan("dev"));
 
 app.use("/api/users", authRoutes);
 
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 app.get("/", (req, res) => {
   res.send("User service running22");
 });

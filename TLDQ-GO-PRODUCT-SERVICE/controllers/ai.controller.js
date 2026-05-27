@@ -4,7 +4,7 @@ const Product = require("../models/product.model");
 const AiChatHistory = require("../models/aiChatHistory.model");
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemini-3.1-flash-lite";
 const MAX_PRODUCTS = 50;
 const DESCRIPTION_LIMIT = 280;
 const HISTORY_LIMIT = 30;
@@ -87,6 +87,9 @@ const buildContext = (products) => {
             0,
             DESCRIPTION_LIMIT,
         );
+        const image = Array.isArray(product?.images) && product.images.length > 0
+            ? product.images[0]
+            : product?.image_url || "";
 
         return {
             id: String(product._id || ""),
@@ -97,6 +100,7 @@ const buildContext = (products) => {
             sold: Number(product?.sold || 0),
             category: categoryName,
             description,
+            image,
         };
     });
 
@@ -216,6 +220,9 @@ exports.aiChat = async (req, res) => {
             rating_average: Number(product?.rating_average || 0),
             sold: Number(product?.sold || 0),
             category: product?.category_id?.name || "",
+            image: Array.isArray(product?.images) && product.images.length > 0
+                ? product.images[0]
+                : product?.image_url || "",
         }));
 
         const userId = getUserIdFromRequest(req);
@@ -232,6 +239,7 @@ exports.aiChat = async (req, res) => {
                         rating_average: item.rating_average,
                         sold: item.sold,
                         category: item.category,
+                        image: item.image,
                     })),
                 });
             } catch (error) {
@@ -263,11 +271,44 @@ exports.aiHistory = async (req, res) => {
 
         const histories = await AiChatHistory.find({ user_id: String(userId) })
             .sort({ createdAt: 1 })
-            .limit(HISTORY_LIMIT);
+            .limit(HISTORY_LIMIT)
+            .lean();
+
+        const productIds = histories.flatMap((history) =>
+            Array.isArray(history.products)
+                ? history.products.map((item) => String(item.product_id || "")).filter(Boolean)
+                : [],
+        );
+
+        const uniqueIds = [...new Set(productIds)];
+        const productMap = new Map();
+
+        if (uniqueIds.length > 0) {
+            const products = await Product.find({ _id: { $in: uniqueIds } })
+                .select("images")
+                .lean();
+
+            products.forEach((product) => {
+                const image = Array.isArray(product.images) && product.images.length > 0
+                    ? product.images[0]
+                    : "";
+                productMap.set(String(product._id), image);
+            });
+        }
+
+        const hydrated = histories.map((history) => ({
+            ...history,
+            products: Array.isArray(history.products)
+                ? history.products.map((item) => ({
+                    ...item,
+                    image: item.image || productMap.get(String(item.product_id)) || "",
+                }))
+                : [],
+        }));
 
         return res.status(200).json({
             message: "Lấy lịch sử AI thành công",
-            data: histories,
+            data: hydrated,
         });
     } catch (error) {
         return res.status(500).json({
