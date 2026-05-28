@@ -1,8 +1,10 @@
 const User = require("../models/user.model");
 const SellerProfile = require("../models/sellerProfile.model");
 const CustomerProfile = require("../models/customerProfile.model");
+const RefreshToken = require("../models/refreshToken.model");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const emailService = require("../services/email.service");
 const cloudinary = require("../config/cloudinary");
 
@@ -25,8 +27,15 @@ function createAccessToken(user) {
   return jwt.sign(
     { userId: user._id, role: user.role },
     process.env.JWT_SECRET || "secretkey",
-    { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
+    { expiresIn: "15m" },
   );
+}
+
+async function createRefreshToken(userId) {
+  const token = crypto.randomBytes(64).toString("hex");
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 ngày
+  await RefreshToken.create({ token, userId, expiresAt });
+  return token;
 }
 
 function validatePassword(password) {
@@ -42,7 +51,9 @@ function getFirstFile(files, fieldName) {
     return null;
   }
 
-  return Array.isArray(files[fieldName]) ? files[fieldName][0] : files[fieldName];
+  return Array.isArray(files[fieldName])
+    ? files[fieldName][0]
+    : files[fieldName];
 }
 
 function uploadBufferToCloudinary(file, folder) {
@@ -103,7 +114,8 @@ async function ensureProfileByRole(userId, role, options = {}) {
 }
 
 async function registerByRole(req, res, role) {
-  const { email, password, phone, full_name, shop_name, address_line } = req.body || {};
+  const { email, password, phone, full_name, shop_name, address_line } =
+    req.body || {};
 
   const normalizedEmail = normalizeEmail(email);
   const normalizedFullName = normalizeText(full_name);
@@ -119,15 +131,21 @@ async function registerByRole(req, res, role) {
   }
 
   if (!validatePassword(password)) {
-    return res.status(400).json({ message: "Password phải có ít nhất 6 ký tự" });
+    return res
+      .status(400)
+      .json({ message: "Password phải có ít nhất 6 ký tự" });
   }
 
   if (!normalizedFullName) {
-    return res.status(400).json({ message: "TÃªn hiá»ƒn thá»‹ lÃ  báº¯t buá»™c" });
+    return res
+      .status(400)
+      .json({ message: "TÃªn hiá»ƒn thá»‹ lÃ  báº¯t buá»™c" });
   }
 
   if (role === "seller" && !normalizedShopName) {
-    return res.status(400).json({ message: "TÃªn cá»­a hÃ ng lÃ  báº¯t buá»™c" });
+    return res
+      .status(400)
+      .json({ message: "TÃªn cá»­a hÃ ng lÃ  báº¯t buá»™c" });
   }
 
   const existingUser = await User.findOne({ email: normalizedEmail });
@@ -151,7 +169,13 @@ async function registerByRole(req, res, role) {
   });
 
   const token = createAccessToken(newUser);
-  return res.status(201).json({ message: "Đăng ký thành công", token, user: omitPassword(newUser) });
+  const refreshToken = await createRefreshToken(newUser._id);
+  return res.status(201).json({
+    message: "Đăng ký thành công",
+    token,
+    refreshToken,
+    user: omitPassword(newUser),
+  });
 }
 
 async function loginByRole(req, res, acceptedRoles) {
@@ -168,7 +192,11 @@ async function loginByRole(req, res, acceptedRoles) {
     return res.status(400).json({ message: "Email hoặc password không đúng" });
   }
 
-  if (Array.isArray(acceptedRoles) && acceptedRoles.length > 0 && !acceptedRoles.includes(user.role)) {
+  if (
+    Array.isArray(acceptedRoles) &&
+    acceptedRoles.length > 0 &&
+    !acceptedRoles.includes(user.role)
+  ) {
     return res.status(403).json({ message: "Không có quyền truy cập" });
   }
 
@@ -178,7 +206,13 @@ async function loginByRole(req, res, acceptedRoles) {
   }
 
   const token = createAccessToken(user);
-  return res.status(200).json({ message: "Đăng nhập thành công", token, user: omitPassword(user) });
+  const refreshToken = await createRefreshToken(user._id);
+  return res.status(200).json({
+    message: "Đăng nhập thành công",
+    token,
+    refreshToken,
+    user: omitPassword(user),
+  });
 }
 
 exports.register = async (req, res) => {
@@ -224,11 +258,15 @@ exports.changePasswordUser = async (req, res) => {
     const { currentPassword, newPassword } = req.body || {};
 
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ message: "currentPassword và newPassword là bắt buộc" });
+      return res
+        .status(400)
+        .json({ message: "currentPassword và newPassword là bắt buộc" });
     }
 
     if (!validatePassword(newPassword)) {
-      return res.status(400).json({ message: "newPassword phải có ít nhất 6 ký tự" });
+      return res
+        .status(400)
+        .json({ message: "newPassword phải có ít nhất 6 ký tự" });
     }
 
     const user = await User.findById(req.userId);
@@ -281,7 +319,8 @@ exports.upgradeSeller = async (req, res) => {
     }
 
     const { phone, full_name, shop_name, address_line } = req.body || {};
-    const normalizedFullName = normalizeText(full_name) || normalizeText(user.full_name);
+    const normalizedFullName =
+      normalizeText(full_name) || normalizeText(user.full_name);
     const normalizedShopName = normalizeText(shop_name);
     const normalizedAddressLine = normalizeText(address_line);
 
@@ -345,11 +384,15 @@ exports.changePasswordSeller = async (req, res) => {
     const { currentPassword, newPassword } = req.body || {};
 
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ message: "currentPassword và newPassword là bắt buộc" });
+      return res
+        .status(400)
+        .json({ message: "currentPassword và newPassword là bắt buộc" });
     }
 
     if (!validatePassword(newPassword)) {
-      return res.status(400).json({ message: "newPassword phải có ít nhất 6 ký tự" });
+      return res
+        .status(400)
+        .json({ message: "newPassword phải có ít nhất 6 ký tự" });
     }
 
     const seller = await User.findById(req.userId);
@@ -382,7 +425,10 @@ exports.loginAdmin = async (req, res) => {
 exports.adminListUsers = async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit, 10) || 10, 1),
+      100,
+    );
 
     const role = req.query.role;
     const status = req.query.status;
@@ -437,7 +483,15 @@ exports.adminGetUserById = async (req, res) => {
 
 exports.adminCreateUser = async (req, res) => {
   try {
-    const { email, password, phone, full_name, role = "customer", status, avatar_url } = req.body || {};
+    const {
+      email,
+      password,
+      phone,
+      full_name,
+      role = "customer",
+      status,
+      avatar_url,
+    } = req.body || {};
 
     const normalizedEmail = normalizeEmail(email);
 
@@ -450,7 +504,9 @@ exports.adminCreateUser = async (req, res) => {
     }
 
     if (!validatePassword(password)) {
-      return res.status(400).json({ message: "Password phải có ít nhất 6 ký tự" });
+      return res
+        .status(400)
+        .json({ message: "Password phải có ít nhất 6 ký tự" });
     }
 
     if (!USER_ROLES.includes(role)) {
@@ -476,7 +532,9 @@ exports.adminCreateUser = async (req, res) => {
 
     await ensureProfileByRole(newUser._id, role, { shop_name: full_name });
 
-    return res.status(201).json({ message: "Tạo user thành công", user: omitPassword(newUser) });
+    return res
+      .status(201)
+      .json({ message: "Tạo user thành công", user: omitPassword(newUser) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -484,7 +542,8 @@ exports.adminCreateUser = async (req, res) => {
 
 exports.adminUpdateUser = async (req, res) => {
   try {
-    const { phone, full_name, role, status, avatar_url, password } = req.body || {};
+    const { phone, full_name, role, status, avatar_url, password } =
+      req.body || {};
 
     const user = await User.findById(req.params.id);
     if (!user) {
@@ -503,7 +562,9 @@ exports.adminUpdateUser = async (req, res) => {
 
     if (typeof password !== "undefined") {
       if (!validatePassword(password)) {
-        return res.status(400).json({ message: "Password phải có ít nhất 6 ký tự" });
+        return res
+          .status(400)
+          .json({ message: "Password phải có ít nhất 6 ký tự" });
       }
       user.password_hash = await bcrypt.hash(password, 10);
     }
@@ -511,7 +572,9 @@ exports.adminUpdateUser = async (req, res) => {
     await user.save();
     await ensureProfileByRole(user._id, user.role, { shop_name: full_name });
 
-    return res.status(200).json({ message: "Cập nhật user thành công", user: omitPassword(user) });
+    return res
+      .status(200)
+      .json({ message: "Cập nhật user thành công", user: omitPassword(user) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -542,7 +605,8 @@ exports.getProfile = async (req, res) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
     const user = await User.findById(userId).select("-password_hash");
-    if (!user) return res.status(404).json({ message: "Người dùng không tồn tại" });
+    if (!user)
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
 
     const [customerProfile, sellerProfile] = await Promise.all([
       CustomerProfile.findOne({ user_id: userId }),
@@ -571,18 +635,20 @@ exports.forgotPassword = async (req, res) => {
     const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
-      return res.status(200).json({ message: "If email exists, reset link has been sent" });
+      return res
+        .status(200)
+        .json({ message: "If email exists, reset link has been sent" });
     }
 
     const resetToken = jwt.sign(
       { userId: user._id.toString(), email: user.email },
       process.env.JWT_SECRET || "secretkey",
-      { expiresIn: "15m" }
+      { expiresIn: "15m" },
     );
 
     await User.findByIdAndUpdate(user._id, {
       reset_password_token: resetToken,
-      reset_password_expires: new Date(Date.now() + 15 * 60 * 1000)
+      reset_password_expires: new Date(Date.now() + 15 * 60 * 1000),
     });
 
     try {
@@ -591,7 +657,9 @@ exports.forgotPassword = async (req, res) => {
       console.error("Email sending failed:", emailError.message);
     }
 
-    return res.status(200).json({ message: "If email exists, reset link has been sent" });
+    return res
+      .status(200)
+      .json({ message: "If email exists, reset link has been sent" });
   } catch (error) {
     console.error("Forgot password error:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -603,18 +671,24 @@ exports.resetPassword = async (req, res) => {
     const { token, newPassword } = req.body || {};
 
     if (!token || !newPassword) {
-      return res.status(400).json({ message: "Token và mật khẩu mới là bắt buộc" });
+      return res
+        .status(400)
+        .json({ message: "Token và mật khẩu mới là bắt buộc" });
     }
 
     if (!validatePassword(newPassword)) {
-      return res.status(400).json({ message: "Mật khẩu phải có ít nhất 6 ký tự" });
+      return res
+        .status(400)
+        .json({ message: "Mật khẩu phải có ít nhất 6 ký tự" });
     }
 
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || "secretkey");
     } catch (err) {
-      return res.status(400).json({ message: "Link đặt lại mật khẩu đã hết hạn hoặc không hợp lệ" });
+      return res.status(400).json({
+        message: "Link đặt lại mật khẩu đã hết hạn hoặc không hợp lệ",
+      });
     }
 
     const user = await User.findOne({
@@ -624,7 +698,9 @@ exports.resetPassword = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(400).json({ message: "Link đặt lại mật khẩu đã hết hạn hoặc không hợp lệ" });
+      return res.status(400).json({
+        message: "Link đặt lại mật khẩu đã hết hạn hoặc không hợp lệ",
+      });
     }
 
     user.password_hash = await bcrypt.hash(newPassword, 10);
@@ -647,14 +723,17 @@ exports.updateProfile = async (req, res) => {
 
     const userId = req.userId;
     const { full_name, phone, avatar_url, address_line } = req.body || {};
-    const avatarFromFile = req.file ? await uploadBufferToCloudinary(req.file, "avatars") : null;
+    const avatarFromFile = req.file
+      ? await uploadBufferToCloudinary(req.file, "avatars")
+      : null;
 
     const user = await User.findById(userId);
     if (!user || !CUSTOMER_ACCESS_ROLES.includes(user.role)) {
       return res.status(404).json({ message: "Người dùng không tồn tại" });
     }
 
-    if (typeof full_name !== "undefined" && normalizeText(full_name)) user.full_name = normalizeText(full_name);
+    if (typeof full_name !== "undefined" && normalizeText(full_name))
+      user.full_name = normalizeText(full_name);
     if (typeof phone !== "undefined") user.phone = phone;
     if (avatarFromFile) {
       user.avatar_url = avatarFromFile;
@@ -707,22 +786,38 @@ exports.updateProfile = async (req, res) => {
 exports.updateSellerProfile = async (req, res) => {
   try {
     if (req.userRole !== "seller") {
-      return res.status(403).json({ message: "Chỉ tài khoản seller mới có thể cập nhật profile bằng endpoint này" });
+      return res.status(403).json({
+        message:
+          "Chỉ tài khoản seller mới có thể cập nhật profile bằng endpoint này",
+      });
     }
 
     const userId = req.userId;
-    const { full_name, phone, avatar_url, shop_name, address_line, shop_email, shop_phone } = req.body || {};
+    const {
+      full_name,
+      phone,
+      avatar_url,
+      shop_name,
+      address_line,
+      shop_email,
+      shop_phone,
+    } = req.body || {};
     const avatarFromFile = getFirstFile(req.files, "avatar");
     const logoFromFile = getFirstFile(req.files, "logo");
-    const avatarUrlFromFile = avatarFromFile ? await uploadBufferToCloudinary(avatarFromFile, "avatars") : null;
-    const logoUrlFromFile = logoFromFile ? await uploadBufferToCloudinary(logoFromFile, "shop-logos") : null;
+    const avatarUrlFromFile = avatarFromFile
+      ? await uploadBufferToCloudinary(avatarFromFile, "avatars")
+      : null;
+    const logoUrlFromFile = logoFromFile
+      ? await uploadBufferToCloudinary(logoFromFile, "shop-logos")
+      : null;
 
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "Seller không tồn tại" });
     }
 
-    if (typeof full_name !== "undefined" && normalizeText(full_name)) user.full_name = normalizeText(full_name);
+    if (typeof full_name !== "undefined" && normalizeText(full_name))
+      user.full_name = normalizeText(full_name);
     if (typeof phone !== "undefined") user.phone = phone;
     if (avatarUrlFromFile) {
       user.avatar_url = avatarUrlFromFile;
@@ -736,10 +831,14 @@ exports.updateSellerProfile = async (req, res) => {
       sellerProfile = await SellerProfile.create({ seller_id: userId });
     }
 
-    if (typeof shop_name !== "undefined" && normalizeText(shop_name)) sellerProfile.shop_name = normalizeText(shop_name);
-    if (typeof address_line !== "undefined") sellerProfile.address_line = address_line;
-    if (typeof shop_email !== "undefined") sellerProfile.shop_email = shop_email;
-    if (typeof shop_phone !== "undefined") sellerProfile.shop_phone = shop_phone;
+    if (typeof shop_name !== "undefined" && normalizeText(shop_name))
+      sellerProfile.shop_name = normalizeText(shop_name);
+    if (typeof address_line !== "undefined")
+      sellerProfile.address_line = address_line;
+    if (typeof shop_email !== "undefined")
+      sellerProfile.shop_email = shop_email;
+    if (typeof shop_phone !== "undefined")
+      sellerProfile.shop_phone = shop_phone;
     if (logoUrlFromFile) {
       sellerProfile.logo_url = logoUrlFromFile;
     }
@@ -765,11 +864,15 @@ exports.changePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body || {};
 
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ message: "currentPassword và newPassword là bắt buộc" });
+      return res
+        .status(400)
+        .json({ message: "currentPassword và newPassword là bắt buộc" });
     }
 
     if (!validatePassword(newPassword)) {
-      return res.status(400).json({ message: "Mật khẩu mới phải có ít nhất 6 ký tự" });
+      return res
+        .status(400)
+        .json({ message: "Mật khẩu mới phải có ít nhất 6 ký tự" });
     }
 
     const user = await User.findById(userId);
@@ -802,15 +905,18 @@ exports.changePassword = async (req, res) => {
 exports.getShopSetupStatus = async (req, res) => {
   try {
     if (req.userRole !== "seller") {
-      return res.status(403).json({ message: "Chỉ tài khoản seller mới có quyền truy cập" });
+      return res
+        .status(403)
+        .json({ message: "Chỉ tài khoản seller mới có quyền truy cập" });
     }
 
     const userId = req.userId;
     const sellerProfile = await SellerProfile.findOne({ seller_id: userId });
 
-    const isSetupComplete = sellerProfile
-      && sellerProfile.shop_name
-      && sellerProfile.shop_name.trim() !== "";
+    const isSetupComplete =
+      sellerProfile &&
+      sellerProfile.shop_name &&
+      sellerProfile.shop_name.trim() !== "";
 
     return res.status(200).json({
       isSetupComplete,
@@ -825,7 +931,9 @@ exports.getShopSetupStatus = async (req, res) => {
 exports.updateShopSettings = async (req, res) => {
   try {
     if (req.userRole !== "seller") {
-      return res.status(403).json({ message: "Chỉ tài khoản seller mới có quyền truy cập" });
+      return res
+        .status(403)
+        .json({ message: "Chỉ tài khoản seller mới có quyền truy cập" });
     }
 
     const userId = req.userId;
@@ -844,8 +952,12 @@ exports.updateShopSettings = async (req, res) => {
     } = req.body || {};
     const logoFromFile = getFirstFile(req.files, "logo");
     const bannerFromFile = getFirstFile(req.files, "banner");
-    const logoUrlFromFile = logoFromFile ? await uploadBufferToCloudinary(logoFromFile, "shop-logos") : null;
-    const bannerUrlFromFile = bannerFromFile ? await uploadBufferToCloudinary(bannerFromFile, "shop-banners") : null;
+    const logoUrlFromFile = logoFromFile
+      ? await uploadBufferToCloudinary(logoFromFile, "shop-logos")
+      : null;
+    const bannerUrlFromFile = bannerFromFile
+      ? await uploadBufferToCloudinary(bannerFromFile, "shop-banners")
+      : null;
 
     if (!shop_name || !shop_name.trim()) {
       return res.status(400).json({ message: "Tên cửa hàng là bắt buộc" });
@@ -866,10 +978,14 @@ exports.updateShopSettings = async (req, res) => {
     }
 
     if (typeof shop_name !== "undefined") sellerProfile.shop_name = shop_name;
-    if (typeof description !== "undefined") sellerProfile.description = description;
-    if (typeof address_line !== "undefined") sellerProfile.address_line = address_line;
-    if (typeof shop_email !== "undefined") sellerProfile.shop_email = shop_email;
-    if (typeof shop_phone !== "undefined") sellerProfile.shop_phone = shop_phone;
+    if (typeof description !== "undefined")
+      sellerProfile.description = description;
+    if (typeof address_line !== "undefined")
+      sellerProfile.address_line = address_line;
+    if (typeof shop_email !== "undefined")
+      sellerProfile.shop_email = shop_email;
+    if (typeof shop_phone !== "undefined")
+      sellerProfile.shop_phone = shop_phone;
     if (logoUrlFromFile) {
       sellerProfile.logo_url = logoUrlFromFile;
     } else if (typeof logo_url !== "undefined") {
@@ -880,9 +996,12 @@ exports.updateShopSettings = async (req, res) => {
     } else if (typeof banner_url !== "undefined") {
       sellerProfile.banner_url = banner_url;
     }
-    if (typeof operating_hours !== "undefined") sellerProfile.operating_hours = operating_hours;
-    if (typeof shipping_policy !== "undefined") sellerProfile.shipping_policy = shipping_policy;
-    if (typeof return_policy !== "undefined") sellerProfile.return_policy = return_policy;
+    if (typeof operating_hours !== "undefined")
+      sellerProfile.operating_hours = operating_hours;
+    if (typeof shipping_policy !== "undefined")
+      sellerProfile.shipping_policy = shipping_policy;
+    if (typeof return_policy !== "undefined")
+      sellerProfile.return_policy = return_policy;
     if (typeof status !== "undefined") sellerProfile.status = status;
 
     await sellerProfile.save();
@@ -897,6 +1016,45 @@ exports.updateShopSettings = async (req, res) => {
   }
 };
 
+exports.refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body || {};
+    if (!refreshToken) {
+      return res.status(400).json({ message: "refreshToken là bắt buộc" });
+    }
+
+    const record = await RefreshToken.findOne({ token: refreshToken });
+    if (!record || record.expiresAt < new Date()) {
+      if (record) await RefreshToken.deleteOne({ _id: record._id });
+      return res
+        .status(401)
+        .json({ message: "Refresh token không hợp lệ hoặc đã hết hạn" });
+    }
+
+    const user = await User.findById(record.userId);
+    if (!user) {
+      return res.status(401).json({ message: "Người dùng không tồn tại" });
+    }
+
+    const token = createAccessToken(user);
+    return res.status(200).json({ token });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    const { refreshToken } = req.body || {};
+    if (refreshToken) {
+      await RefreshToken.deleteOne({ token: refreshToken });
+    }
+    return res.status(200).json({ message: "Đăng xuất thành công" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getSellerPublicProfile = async (req, res) => {
   try {
     const { id } = req.params;
@@ -907,7 +1065,12 @@ exports.getSellerPublicProfile = async (req, res) => {
 
     if (!sellerProfile) {
       return res.status(200).json({
-        data: { shop_name: "Nhà bán", logo_url: null, description: "", rating: 0 },
+        data: {
+          shop_name: "Nhà bán",
+          logo_url: null,
+          description: "",
+          rating: 0,
+        },
       });
     }
 
