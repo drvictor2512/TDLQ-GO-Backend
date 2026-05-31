@@ -18,6 +18,7 @@ async function saveAndNotify(targetUserId, type, title, message, orderId) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ targetUserId, type, title, message, orderId }),
+      signal: AbortSignal.timeout(3000),
     });
   } catch (err) {
     console.error("[Notify] Gateway emit failed:", err.message);
@@ -60,7 +61,9 @@ exports.createOrder = async (req, res) => {
     }
 
     // ── BƯỚC 1: Validate customer (sync HTTP) ──────────────────────────────
-    const userRes = await fetch(`${USER_SERVICE_URL}/api/users/${customer_id}`);
+    const userRes = await fetch(`${USER_SERVICE_URL}/api/users/${customer_id}`, {
+      signal: AbortSignal.timeout(5000),
+    });
     if (!userRes.ok) {
       return res.status(400).json({ message: "Invalid customer_id or user not found" });
     }
@@ -71,7 +74,9 @@ exports.createOrder = async (req, res) => {
     let detected_seller_id = req.body.seller_id || null;
 
     for (const item of items) {
-      const productRes = await fetch(`${PRODUCT_SERVICE_URL}/products/${item.product_id}`);
+      const productRes = await fetch(`${PRODUCT_SERVICE_URL}/products/${item.product_id}`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (!productRes.ok) {
         return res.status(400).json({ message: `Product ${item.product_id} not found` });
       }
@@ -96,7 +101,7 @@ exports.createOrder = async (req, res) => {
 
       console.log(`[Order] product_id=${product._id}, seller_id=${product.seller_id}, detected=${detected_seller_id}`);
 
-      const unitPrice = product.discount_price ?? product.price;
+      const unitPrice = product.discount_price || product.price;
 
       validatedItems.push({
         product_id: product._id,
@@ -156,6 +161,9 @@ exports.createOrder = async (req, res) => {
       order: newOrder,
     });
   } catch (error) {
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      return res.status(503).json({ message: "Dịch vụ tạm thời không phản hồi, vui lòng thử lại" });
+    }
     return res.status(500).json({ message: error.message });
   }
 };
@@ -528,7 +536,9 @@ exports.createVNPayPayment = async (req, res) => {
       return res.status(400).json({ message: "Order items cannot be empty" });
     }
 
-    const userRes = await fetch(`${USER_SERVICE_URL}/api/users/${customer_id}`);
+    const userRes = await fetch(`${USER_SERVICE_URL}/api/users/${customer_id}`, {
+      signal: AbortSignal.timeout(5000),
+    });
     if (!userRes.ok) {
       return res.status(400).json({ message: "Invalid customer_id or user not found" });
     }
@@ -538,7 +548,9 @@ exports.createVNPayPayment = async (req, res) => {
     let detected_seller_id = req.body.seller_id || null;
 
     for (const item of items) {
-      const productRes = await fetch(`${PRODUCT_SERVICE_URL}/products/${item.product_id}`);
+      const productRes = await fetch(`${PRODUCT_SERVICE_URL}/products/${item.product_id}`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (!productRes.ok) {
         return res.status(400).json({ message: `Product ${item.product_id} not found` });
       }
@@ -560,7 +572,7 @@ exports.createVNPayPayment = async (req, res) => {
         detected_seller_id = product.seller_id;
       }
 
-      const unitPrice = product.discount_price ?? product.price;
+      const unitPrice = product.discount_price || product.price;
       validatedItems.push({
         product_id: product._id,
         product_name: product.name,
@@ -572,6 +584,10 @@ exports.createVNPayPayment = async (req, res) => {
 
     if (!detected_seller_id) {
       return res.status(400).json({ message: "Không xác định được seller của sản phẩm" });
+    }
+
+    if (total_amount <= 0) {
+      return res.status(400).json({ message: "Tổng tiền đơn hàng không hợp lệ" });
     }
 
     const newOrder = await Order.create({
@@ -592,15 +608,21 @@ exports.createVNPayPayment = async (req, res) => {
       req.socket?.remoteAddress ||
       "127.0.0.1";
 
-    const paymentUrl = vnpay.buildPaymentUrl({
-      vnp_Amount: total_amount,
-      vnp_IpAddr: ipAddr,
-      vnp_TxnRef: newOrder._id.toString(),
-      vnp_OrderInfo: `Thanh toan don hang ${newOrder._id}`,
-      vnp_OrderType: ProductCode.Other,
-      vnp_ReturnUrl: VNPAY_RETURN_URL,
-      vnp_Locale: VnpLocale.VN,
-    });
+    let paymentUrl;
+    try {
+      paymentUrl = vnpay.buildPaymentUrl({
+        vnp_Amount: total_amount,
+        vnp_IpAddr: ipAddr,
+        vnp_TxnRef: newOrder._id.toString(),
+        vnp_OrderInfo: `Thanh toan don hang ${newOrder._id}`,
+        vnp_OrderType: ProductCode.Other,
+        vnp_ReturnUrl: VNPAY_RETURN_URL,
+        vnp_Locale: VnpLocale.VN,
+      });
+    } catch (vnpayErr) {
+      await Order.findByIdAndDelete(newOrder._id);
+      return res.status(500).json({ message: "Không thể tạo link thanh toán VNPay" });
+    }
 
     return res.status(201).json({
       success: true,
@@ -608,6 +630,9 @@ exports.createVNPayPayment = async (req, res) => {
       paymentUrl,
     });
   } catch (error) {
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      return res.status(503).json({ message: "Dịch vụ tạm thời không phản hồi, vui lòng thử lại" });
+    }
     return res.status(500).json({ message: error.message });
   }
 };

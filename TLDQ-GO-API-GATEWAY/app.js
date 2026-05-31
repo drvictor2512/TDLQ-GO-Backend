@@ -6,6 +6,7 @@ const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const CircuitBreaker = require("opossum");
 const { v4: uuidv4 } = require("uuid");
 const http = require("http");
 const https = require("https");
@@ -85,124 +86,139 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
-// ── Helper: forward request to downstream service ────────────────────────────
-async function forwardRequest(req, res, target, transformPath) {
+// ── Circuit Breaker ───────────────────────────────────────────────────────────
+const BREAKER_OPTIONS = {
+  timeout: false,               // dùng axios/http timeout, không dùng opossum timeout
+  errorThresholdPercentage: 50, // 50% lỗi trong cửa sổ → mở circuit
+  resetTimeout: 30_000,         // 30s trước khi half-open và thử lại
+  volumeThreshold: 5,           // cần ít nhất 5 request trước khi tính tỉ lệ lỗi
+};
+
+function makeBreaker(name, target, transformPath) {
+  const action = (req, res) => doForward(req, res, target, transformPath);
+  const breaker = new CircuitBreaker(action, BREAKER_OPTIONS);
+
+  breaker.on("open",     () => console.warn (`[CB] ⚡ OPEN     — ${name} service`));
+  breaker.on("halfOpen", () => console.info  (`[CB] 🔄 HALF-OPEN — ${name} service`));
+  breaker.on("close",    () => console.info  (`[CB] ✅ CLOSED   — ${name} service`));
+
+  breaker.fallback((req, res) => {
+    if (!res.headersSent) {
+      res.status(503).json({
+        success: false,
+        message: `${name} service tạm thời không khả dụng. Vui lòng thử lại sau.`,
+      });
+    }
+  });
+
+  return breaker;
+}
+
+// ── Helper: forward request — throws on network/5xx errors (cho circuit breaker) ─
+async function doForward(req, res, target, transformPath) {
   if (!target) {
-    return res
-      .status(503)
-      .json({ success: false, message: "Service not configured" });
+    res.status(503).json({ success: false, message: "Service not configured" });
+    return;
   }
-  try {
-    const incomingPath = req.originalUrl;
-    const forwardedPath = transformPath
-      ? transformPath(incomingPath)
-      : incomingPath;
-    const url = `${target}${forwardedPath}`;
-    console.log(
-      `[GATEWAY] [${req.requestId}] -> ${req.method} ${incomingPath} -> ${url}`,
-    );
 
-    // For multipart/form-data (file uploads), pipe the raw request
-    if (req.is("multipart/form-data")) {
-      return new Promise((resolve, reject) => {
-        const targetUrl = new URL(url);
-        const protocol = targetUrl.protocol === "https:" ? https : http;
+  const forwardedPath = transformPath ? transformPath(req.originalUrl) : req.originalUrl;
+  const url = `${target}${forwardedPath}`;
+  console.log(`[GATEWAY] [${req.requestId}] -> ${req.method} ${req.originalUrl} -> ${url}`);
 
-        const options = {
+  // Multipart/form-data: pipe raw request
+  if (req.is("multipart/form-data")) {
+    return new Promise((resolve, reject) => {
+      const targetUrl = new URL(url);
+      const protocol = targetUrl.protocol === "https:" ? https : http;
+
+      const proxyReq = protocol.request(
+        targetUrl,
+        {
           method: req.method,
-          headers: {
-            ...req.headers,
-            host: targetUrl.host,
-            "x-request-id": req.requestId,
-          },
+          headers: { ...req.headers, host: targetUrl.host, "x-request-id": req.requestId },
           timeout: 30000,
-        };
-
-        const proxyReq = protocol.request(targetUrl, options, (proxyRes) => {
+        },
+        (proxyRes) => {
           res.writeHead(proxyRes.statusCode, proxyRes.headers);
           proxyRes.pipe(res);
           proxyRes.on("end", resolve);
-        });
+        },
+      );
 
-        proxyReq.on("error", (error) => {
-          console.error(
-            `[GATEWAY] [${req.requestId}] Proxy error: ${error.message}`,
-          );
-          res
-            .status(502)
-            .json({ success: false, message: "Service unavailable" });
-          reject(error);
-        });
-
-        req.pipe(proxyReq);
+      proxyReq.on("timeout", () => proxyReq.destroy(new Error("Upstream timeout")));
+      proxyReq.on("error", (error) => {
+        console.error(`[GATEWAY] [${req.requestId}] Proxy error: ${error.message}`);
+        if (!res.headersSent) {
+          res.status(502).json({ success: false, message: "Service unavailable" });
+        }
+        reject(error); // triggers circuit breaker
       });
-    }
 
-    // For JSON/form-urlencoded, use axios
-    const config = {
+      req.pipe(proxyReq);
+    });
+  }
+
+  // JSON/form-urlencoded: use axios
+  try {
+    const response = await axios({
       method: req.method,
-      url: url,
-      headers: {
-        ...req.headers,
-        host: new URL(target).host,
-        "x-request-id": req.requestId,
-      },
+      url,
+      headers: { ...req.headers, host: new URL(target).host, "x-request-id": req.requestId },
       data: req.body,
       timeout: 30000,
-    };
-
-    const response = await axios(config);
+    });
     res.status(response.status).json(response.data);
   } catch (error) {
     console.error(`[GATEWAY] [${req.requestId}] Error: ${error.message}`);
-    if (error.response) {
+
+    if (error.response && error.response.status < 500) {
+      // 4xx: lỗi business hợp lệ, không trigger circuit breaker
       res.status(error.response.status).json(error.response.data);
-    } else if (!res.headersSent) {
-      res.status(502).json({ success: false, message: "Service unavailable" });
+      return;
     }
+
+    // 5xx hoặc network error: ghi response VÀ throw để circuit breaker ghi nhận
+    if (!res.headersSent) {
+      if (error.response) {
+        res.status(error.response.status).json(error.response.data);
+      } else {
+        res.status(502).json({ success: false, message: "Service unavailable" });
+      }
+    }
+    throw error; // triggers circuit breaker failure count
   }
 }
+
+// ── Circuit Breakers (1 per service) ─────────────────────────────────────────
+const cbUser    = makeBreaker("user",    USER_SERVICE_URL,    null);
+const cbProduct = makeBreaker("product", PRODUCT_SERVICE_URL, (p) => p.replace(/^\/api/, ""));
+const cbOrder   = makeBreaker("order",   ORDER_SERVICE_URL,   (p) => p.replace(/^\/api/, ""));
+const cbCart    = makeBreaker("cart",    CART_SERVICE_URL,    (p) => p.replace(/^\/api\/cart/, "/cart"));
 
 /*
 USER SERVICE
 */
-app.use("/api/users", (req, res) => forwardRequest(req, res, USER_SERVICE_URL));
+app.use("/api/users", (req, res) => cbUser.fire(req, res));
 
 /*
 PRODUCT SERVICE
 */
-app.use("/api/products", (req, res) =>
-  forwardRequest(req, res, PRODUCT_SERVICE_URL, (path) =>
-    path.replace(/^\/api/, ""),
-  ),
-);
+app.use("/api/products", (req, res) => cbProduct.fire(req, res));
 
 /*
 ORDER SERVICE
 */
-app.use("/api/orders", (req, res) =>
-  forwardRequest(req, res, ORDER_SERVICE_URL, (path) =>
-    path.replace(/^\/api/, ""),
-  ),
-);
+app.use("/api/orders", (req, res) => cbOrder.fire(req, res));
 
 /*
 CART SERVICE
 */
-app.use("/api/cart", (req, res) =>
-  forwardRequest(req, res, CART_SERVICE_URL, (path) =>
-    path.replace(/^\/api\/cart/, "/cart"),
-  ),
-);
+app.use("/api/cart", (req, res) => cbCart.fire(req, res));
 
 /*
 VOUCHER SERVICE (inside product service)
 */
-app.use("/api/vouchers", (req, res) =>
-  forwardRequest(req, res, PRODUCT_SERVICE_URL, (path) =>
-    path.replace(/^\/api/, ""),
-  ),
-);
+app.use("/api/vouchers", (req, res) => cbProduct.fire(req, res));
 
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "api-gateway" });

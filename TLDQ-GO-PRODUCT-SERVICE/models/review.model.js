@@ -7,8 +7,10 @@ const reviewSchema = new mongoose.Schema(
       ref: "Product",
     },
     user_id: String,
+    user_name: String,
     rating: Number,
     comment: String,
+    images: [String],
   },
   { timestamps: true },
 );

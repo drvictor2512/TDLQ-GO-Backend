@@ -28,7 +28,9 @@ exports.addItem = async (req, res) => {
     }
 
     // Lấy thông tin sản phẩm từ Product Service
-    const productRes = await fetch(`${PRODUCT_SERVICE_URL}/products/${product_id}`);
+    const productRes = await fetch(`${PRODUCT_SERVICE_URL}/products/${product_id}`, {
+      signal: AbortSignal.timeout(5000),
+    });
     if (!productRes.ok) {
       return res.status(400).json({ success: false, message: "Không tìm thấy sản phẩm" });
     }
