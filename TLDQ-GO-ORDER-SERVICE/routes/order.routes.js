@@ -19,6 +19,7 @@ router.get("/customer/:customer_id", orderController.getOrdersByCustomer);
 // Seller APIs — stats phải đứng trước route có tham số :seller_id
 router.get("/seller/:seller_id/stats", orderController.getSellerStats);
 router.get("/seller/:seller_id", orderController.getOrdersBySeller);
+router.post("/:id/cancel", orderController.cancelOrderByCustomer);
 router.put("/:id/status", orderController.updateOrderStatus);
 
 // Notifications

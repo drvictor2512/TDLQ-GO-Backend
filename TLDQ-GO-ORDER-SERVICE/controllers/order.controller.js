@@ -219,9 +219,14 @@ exports.updateOrderStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid status" });
     }
 
+    const updateData = { status };
+    if (status === "completed") {
+      updateData.payment_status = "paid";
+    }
+
     const order = await Order.findByIdAndUpdate(
       order_id,
-      { status },
+      updateData,
       { new: true }
     );
 
@@ -288,6 +293,72 @@ exports.updateOrderStatus = async (req, res) => {
   }
 };
 
+// POST /orders/:id/cancel — customer cancels own order (pending or awaiting_payment only)
+exports.cancelOrderByCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { customer_id } = req.body;
+
+    if (!customer_id) {
+      return res.status(400).json({ success: false, message: "Thiếu customer_id" });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
+    }
+
+    if (order.customer_id.toString() !== customer_id.toString()) {
+      return res.status(403).json({ success: false, message: "Không có quyền hủy đơn hàng này" });
+    }
+
+    const cancellableStatuses = ["pending", "awaiting_payment"];
+    if (!cancellableStatuses.includes(order.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Chỉ có thể hủy đơn khi đang chờ xác nhận hoặc chờ thanh toán",
+      });
+    }
+
+    const prevStatus = order.status;
+    order.status = "cancelled";
+    await order.save();
+
+    // Chỉ hoàn tồn kho khi đơn đã ở trạng thái "pending" (stock đã bị trừ qua event order.created).
+    // Đơn "awaiting_payment" (VNPay chưa thanh toán) chưa trừ stock nên không cần hoàn.
+    if (prevStatus === "pending") {
+      publishEvent("order.cancelled", {
+        order_id: order._id.toString(),
+        items: order.items.map((i) => ({
+          product_id: i.product_id.toString(),
+          quantity: i.quantity,
+        })),
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const orderShort = order._id.toString().slice(-6).toUpperCase();
+    saveAndNotify(
+      order.customer_id.toString(),
+      "cancelled",
+      "Đơn hàng đã hủy",
+      `Bạn đã hủy đơn hàng #${orderShort}.`,
+      order._id.toString()
+    );
+    saveAndNotify(
+      order.seller_id,
+      "order_cancelled",
+      "Khách hủy đơn hàng",
+      `Khách hàng đã hủy đơn #${orderShort}.`,
+      order._id.toString()
+    );
+
+    return res.status(200).json({ success: true, message: "Đơn hàng đã được hủy", data: order });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.getSellerStats = async (req, res) => {
   try {
     const { seller_id } = req.params;
@@ -315,7 +386,19 @@ exports.getSellerStats = async (req, res) => {
             {
               $group: {
                 _id: null,
-                total_orders: { $sum: 1 },
+                total_orders: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $ne: ["$status", "awaiting_payment"] },
+                          { $not: { $and: [{ $eq: ["$status", "cancelled"] }, { $eq: ["$payment_status", "failed"] }] } },
+                        ],
+                      },
+                      1, 0,
+                    ],
+                  },
+                },
                 total_revenue: {
                   $sum: {
                     $cond: [{ $eq: ["$status", "completed"] }, "$total_amount", 0],
@@ -325,7 +408,12 @@ exports.getSellerStats = async (req, res) => {
                   $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] },
                 },
                 cancelled_orders: {
-                  $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] },
+                  $sum: {
+                    $cond: [
+                      { $and: [{ $eq: ["$status", "cancelled"] }, { $ne: ["$payment_status", "failed"] }] },
+                      1, 0,
+                    ],
+                  },
                 },
                 pending_orders: {
                   $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] },
@@ -457,12 +545,31 @@ exports.getAdminStats = async (req, res) => {
               {
                 $group: {
                   _id: null,
-                  total_orders: { $sum: 1 },
+                  total_orders: {
+                    $sum: {
+                      $cond: [
+                        {
+                          $and: [
+                            { $ne: ["$status", "awaiting_payment"] },
+                            { $not: { $and: [{ $eq: ["$status", "cancelled"] }, { $eq: ["$payment_status", "failed"] }] } },
+                          ],
+                        },
+                        1, 0,
+                      ],
+                    },
+                  },
                   total_revenue: {
                     $sum: { $cond: [{ $eq: ["$status", "completed"] }, "$total_amount", 0] },
                   },
                   completed_orders: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
-                  cancelled_orders: { $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] } },
+                  cancelled_orders: {
+                    $sum: {
+                      $cond: [
+                        { $and: [{ $eq: ["$status", "cancelled"] }, { $ne: ["$payment_status", "failed"] }] },
+                        1, 0,
+                      ],
+                    },
+                  },
                   pending_orders: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
                 },
               },
