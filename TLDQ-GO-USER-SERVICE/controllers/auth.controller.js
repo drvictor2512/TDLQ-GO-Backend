@@ -310,11 +310,16 @@ exports.upgradeSeller = async (req, res) => {
     }
 
     if (user.role === "seller") {
-      const token = createAccessToken(user);
       return res.status(200).json({
         message: "Tài khoản đã là seller",
-        token,
         user: omitPassword(user),
+      });
+    }
+
+    if (user.seller_upgrade_status === "pending") {
+      return res.status(400).json({
+        message: "Yêu cầu nâng cấp của bạn đang chờ admin phê duyệt",
+        seller_upgrade_status: "pending",
       });
     }
 
@@ -325,41 +330,135 @@ exports.upgradeSeller = async (req, res) => {
     const normalizedAddressLine = normalizeText(address_line);
 
     if (!normalizedFullName) {
-      return res.status(400).json({
-        message: "Tên hiển thị là bắt buộc",
-      });
+      return res.status(400).json({ message: "Tên hiển thị là bắt buộc" });
     }
 
     if (!normalizedShopName) {
-      return res.status(400).json({
-        message: "Tên shop là bắt buộc",
-      });
+      return res.status(400).json({ message: "Tên shop là bắt buộc" });
     }
 
     if (typeof phone !== "undefined") user.phone = phone;
     user.full_name = normalizedFullName;
+    user.seller_upgrade_status = "pending";
+    user.seller_upgrade_shop_name = normalizedShopName;
+    user.seller_upgrade_address = normalizedAddressLine;
+    user.seller_upgrade_requested_at = new Date();
+    user.seller_upgrade_reject_reason = undefined;
+    await user.save();
 
-    await ensureProfileByRole(user._id, "seller", {
-      shop_name: normalizedShopName,
-      address_line: normalizedAddressLine,
+    return res.status(202).json({
+      message: "Yêu cầu nâng cấp seller đã được gửi, vui lòng chờ admin phê duyệt",
+      seller_upgrade_status: "pending",
+      user: omitPassword(user),
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.adminListSellerRequests = async (req, res) => {
+  try {
+    const status = req.query.status || "pending";
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+
+    const validStatuses = ["pending", "rejected"];
+    const filter = validStatuses.includes(status)
+      ? { seller_upgrade_status: status }
+      : { seller_upgrade_status: { $in: validStatuses } };
+
+    const [items, total] = await Promise.all([
+      User.find(filter)
+        .select("-password_hash")
+        .sort({ seller_upgrade_requested_at: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      User.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.adminApproveSellerUpgrade = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
+    }
+
+    if (user.seller_upgrade_status !== "pending") {
+      return res.status(400).json({
+        message: "Không có yêu cầu nâng cấp đang chờ từ người dùng này",
+      });
+    }
+
+    const shopName = user.seller_upgrade_shop_name || "";
+    const addressLine = user.seller_upgrade_address || "";
+
+    user.role = "seller";
+    user.seller_upgrade_status = "none";
+    user.seller_upgrade_shop_name = undefined;
+    user.seller_upgrade_address = undefined;
+    user.seller_upgrade_requested_at = undefined;
+    user.seller_upgrade_reject_reason = undefined;
+    await user.save();
 
     let sellerProfile = await SellerProfile.findOne({ seller_id: user._id });
     if (!sellerProfile) {
-      sellerProfile = await SellerProfile.create({ seller_id: user._id });
+      sellerProfile = await SellerProfile.create({
+        seller_id: user._id,
+        shop_name: shopName,
+        address_line: addressLine,
+      });
+    } else {
+      if (shopName) sellerProfile.shop_name = shopName;
+      if (addressLine) sellerProfile.address_line = addressLine;
+      await sellerProfile.save();
     }
-    sellerProfile.shop_name = normalizedShopName;
-    if (normalizedAddressLine) {
-      sellerProfile.address_line = normalizedAddressLine;
+
+    return res.status(200).json({
+      message: "Đã phê duyệt nâng cấp seller thành công",
+      user: omitPassword(user),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.adminRejectSellerUpgrade = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "Người dùng không tồn tại" });
     }
-    await sellerProfile.save();
-    user.role = "seller";
+
+    if (user.seller_upgrade_status !== "pending") {
+      return res.status(400).json({
+        message: "Không có yêu cầu nâng cấp đang chờ từ người dùng này",
+      });
+    }
+
+    const reason = normalizeText(req.body?.reason);
+
+    user.seller_upgrade_status = "rejected";
+    user.seller_upgrade_reject_reason = reason || "Không đáp ứng yêu cầu";
+    user.seller_upgrade_shop_name = undefined;
+    user.seller_upgrade_address = undefined;
     await user.save();
 
-    const token = createAccessToken(user);
     return res.status(200).json({
-      message: "Nâng cấp tài khoản seller thành công",
-      token,
+      message: "Đã từ chối yêu cầu nâng cấp seller",
       user: omitPassword(user),
     });
   } catch (error) {

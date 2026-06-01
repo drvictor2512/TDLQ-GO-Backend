@@ -117,6 +117,26 @@ router.delete(
   authController.adminDeleteUser,
 );
 
+// Admin — seller upgrade requests
+router.get(
+  "/admin/seller-requests",
+  authMiddleware,
+  authMiddleware.requireRoles("admin"),
+  authController.adminListSellerRequests,
+);
+router.post(
+  "/admin/seller-requests/:id/approve",
+  authMiddleware,
+  authMiddleware.requireRoles("admin"),
+  authController.adminApproveSellerUpgrade,
+);
+router.post(
+  "/admin/seller-requests/:id/reject",
+  authMiddleware,
+  authMiddleware.requireRoles("admin"),
+  authController.adminRejectSellerUpgrade,
+);
+
 // Public seller profile — must be before /:id to avoid Express matching "seller" as an id
 router.get("/seller/:id/profile", authController.getSellerPublicProfile);
 
