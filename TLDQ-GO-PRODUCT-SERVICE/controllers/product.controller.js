@@ -616,7 +616,14 @@ exports.createFlashSale = async (req, res) => {
     const end = new Date(end_time);
     const now = new Date();
 
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ message: "Thời gian không hợp lệ" });
+    }
     if (end <= start) return res.status(400).json({ message: "end_time phải sau start_time" });
+    if (end <= now) return res.status(400).json({ message: "end_time phải là thời điểm trong tương lai" });
+    if (Number(sale_price) <= 0) {
+      return res.status(400).json({ message: "Giá sale phải lớn hơn 0" });
+    }
     if (Number(sale_price) >= product.price) {
       return res.status(400).json({ message: "Giá sale phải thấp hơn giá gốc" });
     }
@@ -704,11 +711,14 @@ exports.updateFlashSale = async (req, res) => {
 
     const flashSale = await FlashSale.findById(id);
     if (!flashSale) return res.status(404).json({ message: "Không tìm thấy flash sale" });
-    if (seller_id && String(flashSale.seller_id) !== String(seller_id)) {
+    if (!seller_id || String(flashSale.seller_id) !== String(seller_id)) {
       return res.status(403).json({ message: "Bạn không có quyền sửa flash sale này" });
     }
 
     if (sale_price !== undefined) {
+      if (Number(sale_price) <= 0) {
+        return res.status(400).json({ message: "Giá sale phải lớn hơn 0" });
+      }
       if (Number(sale_price) >= flashSale.original_price) {
         return res.status(400).json({ message: "Giá sale phải thấp hơn giá gốc" });
       }
@@ -745,7 +755,7 @@ exports.deleteFlashSale = async (req, res) => {
 
     const flashSale = await FlashSale.findById(id);
     if (!flashSale) return res.status(404).json({ message: "Không tìm thấy flash sale" });
-    if (seller_id && String(flashSale.seller_id) !== String(seller_id)) {
+    if (!seller_id || String(flashSale.seller_id) !== String(seller_id)) {
       return res.status(403).json({ message: "Bạn không có quyền xóa flash sale này" });
     }
 
