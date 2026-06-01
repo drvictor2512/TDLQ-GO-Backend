@@ -31,4 +31,7 @@ const aiChatHistorySchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// aiHistory: find({ user_id }).sort({ createdAt: -1 }).limit(30)
+aiChatHistorySchema.index({ user_id: 1, createdAt: -1 });
+
 module.exports = mongoose.model("AiChatHistory", aiChatHistorySchema);

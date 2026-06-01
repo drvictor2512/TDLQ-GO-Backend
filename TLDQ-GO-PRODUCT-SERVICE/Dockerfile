@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 3002
 
-CMD ["sh", "-c", "npm install && node app.js"]
+CMD ["node", "app.js"]

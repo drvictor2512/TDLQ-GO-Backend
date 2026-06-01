@@ -46,12 +46,16 @@ async function cacheDel(...keys) {
   }
 }
 
-// Xóa tất cả key khớp pattern (dùng khi cần invalidate nhiều page)
+// Xóa tất cả key khớp pattern dùng SCAN cursor (an toàn cho production)
 async function cacheDelPattern(pattern) {
   try {
     const redis = getRedis();
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) await redis.del(...keys);
+    let cursor = "0";
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, "MATCH", pattern, "COUNT", 100);
+      cursor = nextCursor;
+      if (keys.length > 0) await redis.del(...keys);
+    } while (cursor !== "0");
   } catch {
     // silent
   }
