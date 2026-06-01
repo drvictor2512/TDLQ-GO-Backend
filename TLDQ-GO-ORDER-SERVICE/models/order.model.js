@@ -65,4 +65,13 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// getOrdersByCustomer: find({ customer_id }).sort({ createdAt: -1 })
+orderSchema.index({ customer_id: 1, createdAt: -1 });
+
+// getOrdersBySeller + getSellerStats: find/aggregate({ seller_id, createdAt >= startDate })
+orderSchema.index({ seller_id: 1, createdAt: -1 });
+
+// getAdminStats: aggregate({ createdAt >= startDate }) — toàn hệ thống, không lọc seller
+orderSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model("Order", orderSchema);
