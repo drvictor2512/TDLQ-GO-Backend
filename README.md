@@ -1,20 +1,20 @@
 # TLDQ-GO Backend
 
-Backend cho nền tảng thương mại điện tử TLDQ-GO, được xây dựng theo kiến trúc microservices với Node.js, Express và MongoDB. API Gateway là điểm truy cập duy nhất từ frontend; Nginx, Redis và RabbitMQ đảm nhiệm lần lượt việc reverse proxy, cache/giỏ hàng và giao tiếp bất đồng bộ giữa các service.
+Backend for the TLDQ-GO e-commerce platform, built with a microservices architecture using Node.js, Express, and MongoDB. The API Gateway is the single entry point for the frontend; Nginx, Redis, and RabbitMQ provide reverse proxying, caching/cart storage, and asynchronous service communication.
 
-## Mục lục
+## Table of contents
 
-- [Kiến trúc](#kiến-trúc)
-- [Các service](#các-service)
-- [Yêu cầu](#yêu-cầu)
-- [Cấu hình môi trường](#cấu-hình-môi-trường)
-- [Chạy toàn bộ hệ thống bằng Docker](#chạy-toàn-bộ-hệ-thống-bằng-docker)
-- [Chạy từng service ở local](#chạy-từng-service-ở-local)
-- [API và kiểm tra nhanh](#api-và-kiểm-tra-nhanh)
-- [Luồng dữ liệu](#luồng-dữ-liệu)
-- [Vận hành và xử lý sự cố](#vận-hành-và-xử-lý-sự-cố)
+- [Architecture](#architecture)
+- [Services](#services)
+- [Requirements](#requirements)
+- [Environment configuration](#environment-configuration)
+- [Run the full system with Docker](#run-the-full-system-with-docker)
+- [Run individual services locally](#run-individual-services-locally)
+- [API and quick checks](#api-and-quick-checks)
+- [Data flow](#data-flow)
+- [Operations and troubleshooting](#operations-and-troubleshooting)
 
-## Kiến trúc
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -33,33 +33,33 @@ flowchart LR
     Order <--> Rabbit
 ```
 
-Ở môi trường Docker Compose, frontend gọi qua `http://localhost` (Nginx). Khi phát triển frontend bằng Vite, có thể gọi trực tiếp API Gateway tại `http://localhost:3000`.
+In the Docker Compose environment, the frontend connects through `http://localhost` (Nginx). When developing the frontend with Vite, it can connect directly to the API Gateway at `http://localhost:3000`.
 
-## Các service
+## Services
 
-| Thành phần | Cổng mặc định | Trách nhiệm |
+| Component | Default port | Responsibility |
 | --- | ---: | --- |
-| `nginx` | `80` | Reverse proxy, giới hạn upload 20 MB và hỗ trợ WebSocket |
-| `api-gateway` | `3000` | Định tuyến API, CORS, rate limit, Swagger, circuit breaker và Socket.IO |
-| `user-service` | `3001` | Đăng ký, đăng nhập, JWT, hồ sơ và email xác thực |
-| `product-service` | `3002` | Sản phẩm, danh mục, đánh giá, voucher, flash sale và AI |
-| `order-service` | `3003` | Đơn hàng, thanh toán VNPay và thông báo |
-| `cart-service` | `3004` | Giỏ hàng lưu trên Redis |
-| `redis` | `6379` | Cache và dữ liệu giỏ hàng |
-| `rabbitmq` | `5672` / `15672` | Message broker và trang quản trị |
+| `nginx` | `80` | Reverse proxy, 20 MB upload limit, and WebSocket support |
+| `api-gateway` | `3000` | API routing, CORS, rate limiting, Swagger, circuit breakers, and Socket.IO |
+| `user-service` | `3001` | Registration, authentication, JWT, profiles, and verification email |
+| `product-service` | `3002` | Products, categories, reviews, vouchers, flash sales, and AI |
+| `order-service` | `3003` | Orders, VNPay payments, and notifications |
+| `cart-service` | `3004` | Redis-backed shopping cart |
+| `redis` | `6379` | Cache and cart data |
+| `rabbitmq` | `5672` / `15672` | Message broker and management UI |
 
-## Yêu cầu
+## Requirements
 
-- Docker Desktop với Docker Compose v2
-- Hoặc Node.js 18+ và npm nếu chạy từng service
-- MongoDB cho `user-service`, `product-service` và `order-service`
-- Tài khoản Cloudinary nếu có upload ảnh
-- Tài khoản SMTP nếu sử dụng email xác thực hoặc đặt lại mật khẩu
-- Tài khoản VNPay Sandbox và Gemini nếu sử dụng các tính năng tương ứng
+- Docker Desktop with Docker Compose v2
+- Node.js 18+ and npm when running services individually
+- MongoDB for `user-service`, `product-service`, and `order-service`
+- A Cloudinary account for image uploads
+- An SMTP account for verification and password reset emails
+- VNPay Sandbox and Gemini accounts for the corresponding features
 
-## Cấu hình môi trường
+## Environment configuration
 
-Mỗi service đọc biến môi trường từ file `.env` riêng trong thư mục service. Không commit các file `.env` chứa secret.
+Each service reads environment variables from its own `.env` file. Do not commit `.env` files containing secrets.
 
 ### API Gateway
 
@@ -71,7 +71,7 @@ ORDER_SERVICE=http://order:3003
 CART_SERVICE=http://cart:3004
 ```
 
-Khi chạy ngoài Docker, thay hostname Docker bằng `localhost` tương ứng.
+When running outside Docker, replace Docker hostnames with the corresponding `localhost` addresses.
 
 ### User Service
 
@@ -91,7 +91,7 @@ EMAIL_PASS=your-email-password
 FRONTEND_URL=http://localhost:5173
 ```
 
-`USER_SERVICE_MONGO_URI`, `USER_SERVICE_DB_NAME`, `DB_NAME` cũng được hỗ trợ bởi code hiện tại như các tên thay thế cho MongoDB của user service.
+The current code also supports `USER_SERVICE_MONGO_URI`, `USER_SERVICE_DB_NAME`, and `DB_NAME` as alternative variable names for the user service MongoDB configuration.
 
 ### Product Service
 
@@ -131,43 +131,43 @@ REDIS_URL=redis://localhost:6379
 PRODUCT_SERVICE_URL=http://localhost:3002
 ```
 
-## Chạy toàn bộ hệ thống bằng Docker
+## Run the full system with Docker
 
-1. Tạo các file `.env` theo từng service như phần [Cấu hình môi trường](#cấu-hình-môi-trường).
-2. Từ thư mục `TDLQ-GO-Backend`, build và khởi động các container:
+1. Create the service-specific `.env` files described in [Environment configuration](#environment-configuration).
+2. From the `TDLQ-GO-Backend` directory, build and start the containers:
 
 ```bash
 docker compose up -d --build
 ```
 
-3. Kiểm tra trạng thái:
+3. Check the status:
 
 ```bash
 docker compose ps
 docker compose logs -f api-gateway
 ```
 
-4. Các địa chỉ hữu ích:
+4. Useful URLs:
 
-| Địa chỉ | Mục đích |
+| URL | Purpose |
 | --- | --- |
-| `http://localhost` | API qua Nginx |
-| `http://localhost:3000` | API Gateway trực tiếp |
+| `http://localhost` | API through Nginx |
+| `http://localhost:3000` | Direct API Gateway access |
 | `http://localhost:3000/api-docs` | Swagger UI |
-| `http://localhost/nginx-health` | Health check Nginx |
+| `http://localhost/nginx-health` | Nginx health check |
 | `http://localhost:15672` | RabbitMQ Management UI (`guest` / `guest`) |
 
-Dừng hệ thống bằng:
+Stop the system with:
 
 ```bash
 docker compose down
 ```
 
-Muốn xóa cả volume dữ liệu được Docker quản lý, dùng `docker compose down -v` với sự thận trọng phù hợp.
+To also remove Docker-managed data volumes, use `docker compose down -v` with appropriate caution.
 
-## Chạy từng service ở local
+## Run individual services locally
 
-Khởi động Redis, RabbitMQ và MongoDB trước, sau đó cài dependency và chạy từng service:
+Start Redis, RabbitMQ, and MongoDB first. Then install dependencies and run each service:
 
 ```bash
 cd TLDQ-GO-USER-SERVICE
@@ -175,7 +175,7 @@ npm install
 npm run dev
 ```
 
-Các service còn lại có cùng quy trình:
+The remaining services follow the same process:
 
 ```bash
 cd TLDQ-GO-PRODUCT-SERVICE
@@ -195,55 +195,55 @@ npm install
 npm start
 ```
 
-Trong terminal local, API Gateway cần trỏ tới các service bằng `http://localhost:<port>`. Frontend Vite mặc định sử dụng `VITE_API_URL=http://localhost:3000`.
+In a local terminal, the API Gateway must point to the services through `http://localhost:<port>`. The Vite frontend uses `VITE_API_URL=http://localhost:3000` by default.
 
-## API và kiểm tra nhanh
+## API and quick checks
 
-Tất cả endpoint nghiệp vụ đi qua API Gateway:
+All business endpoints go through the API Gateway:
 
-- `/api/users` - xác thực và người dùng
-- `/api/products` - sản phẩm và danh mục
-- `/api/orders` - đơn hàng và thanh toán
-- `/api/cart` - giỏ hàng
-- `/api/vouchers` - voucher
+- `/api/users` - authentication and users
+- `/api/products` - products and categories
+- `/api/orders` - orders and payments
+- `/api/cart` - shopping cart
+- `/api/vouchers` - vouchers
 
-Kiểm tra API Gateway:
+Check the API Gateway:
 
 ```bash
 curl http://localhost:3000/
 ```
 
-Kết quả mong đợi có dạng:
+The expected response is:
 
 ```json
 {"status":"ok","service":"api-gateway"}
 ```
 
-Swagger UI cung cấp schema và danh sách endpoint tại `http://localhost:3000/api-docs`. Có thể import collection Postman tại `docs/postman_collection.json`; collection mặc định dùng `http://localhost:3000` và tự lưu token sau khi đăng nhập.
+Swagger UI provides the schema and endpoint list at `http://localhost:3000/api-docs`. You can import the Postman collection from `docs/postman_collection.json`; it uses `http://localhost:3000` by default and stores the token after login.
 
-Các service nghiệp vụ có health endpoint:
+Business services expose the following health endpoint:
 
 ```text
 GET /health
 ```
 
-## Luồng dữ liệu
+## Data flow
 
-- Request từ frontend đi qua Nginx rồi đến API Gateway.
-- API Gateway chuyển tiếp request đến service tương ứng và gắn `X-Request-ID` để trace.
-- Circuit breaker tại Gateway trả về `503` khi service downstream không khả dụng.
-- Product và Order trao đổi sự kiện qua RabbitMQ.
-- Cart và một phần cache product sử dụng Redis.
-- User, Product và Order dùng các database MongoDB riêng để tách dữ liệu.
+- Frontend requests pass through Nginx and then reach the API Gateway.
+- The API Gateway forwards requests to the appropriate service and adds `X-Request-ID` for tracing.
+- The Gateway circuit breakers return `503` when a downstream service is unavailable.
+- Product and Order exchange events through RabbitMQ.
+- Cart and part of the product cache use Redis.
+- User, Product, and Order use separate MongoDB databases for data isolation.
 
-## Vận hành và xử lý sự cố
+## Operations and troubleshooting
 
-- Xem log toàn bộ hệ thống: `docker compose logs -f`.
-- Xem log một service: `docker compose logs -f product`.
-- Nếu Gateway trả `Service not configured`, kiểm tra các biến `USER_SERVICE`, `PRODUCT_SERVICE`, `ORDER_SERVICE`, `CART_SERVICE`.
-- Nếu service không healthy, kiểm tra MongoDB, Redis hoặc RabbitMQ trước khi restart container.
-- Không dùng `guest/guest` của RabbitMQ trong môi trường production.
-- Thay `JWT_SECRET`, VNPay secret, SMTP password, Cloudinary secret và Gemini key bằng secret được quản lý riêng khi triển khai thật.
+- View all system logs: `docker compose logs -f`.
+- View one service's logs: `docker compose logs -f product`.
+- If the Gateway returns `Service not configured`, check `USER_SERVICE`, `PRODUCT_SERVICE`, `ORDER_SERVICE`, and `CART_SERVICE`.
+- If a service is unhealthy, check MongoDB, Redis, or RabbitMQ before restarting the container.
+- Do not use RabbitMQ's `guest/guest` credentials in production.
+- Replace `JWT_SECRET`, VNPay secrets, SMTP passwords, Cloudinary secrets, and the Gemini key with managed secrets for real deployments.
 
 ## Cấu trúc thư mục
 
